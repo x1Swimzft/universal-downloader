@@ -1,0 +1,45 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.spec
+
+# Build & Release Artifacts
+build/
+dist/
+dist-release/
+release/
+*.blockmap
+*.exe
+*.zip
+*.dll
+
+# Temporary Files & Download Cache
+tmp/
+backend/tmp/
+*.log
+*.tmp
+
+# Node.js & Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+desktop/node_modules/
+desktop/dist-release/
+desktop/bin/
+desktop/backend-engine/
+desktop/frontend-out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

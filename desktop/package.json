@@ -1,0 +1,60 @@
+{
+  "name": "universal-downloader",
+  "productName": "Universal Downloader",
+  "version": "0.1.0",
+  "description": "Universal Video and Audio Downloader for Windows 11",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.universaldownloader.app",
+    "productName": "Universal Downloader",
+    "directories": {
+      "output": "dist-release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Universal Downloader"
+    },
+    "extraResources": [
+      {
+        "from": "backend-engine",
+        "to": "backend-engine",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "frontend-out",
+        "to": "frontend-out",
+        "filter": ["**/*"]
+      }
+    ]
+  }
+}
