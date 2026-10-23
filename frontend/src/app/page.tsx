@@ -1,546 +1,421 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import Image from "next/image";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   fetchInfo,
-  startDownload,
-  pollProgress,
-  getFileUrl,
-  addBatchToQueue,
+  enqueueDownload,
+  cancelQueueItem,
   getQueueStreamUrl,
+  getAppSettings,
+  updateAppSettings,
+  pickSaveFolder,
+  openSaveFolder,
+  triggerDesktopNotification,
   MediaInfo,
-  JobStatus,
   QueueItem,
+  DownloadFormat,
+  AppSettings,
+  HistoryItem,
 } from "@/lib/api";
+import { SvgSprite, Icon } from "@/components/Icons";
+import { Sidebar, SidebarView } from "@/components/Sidebar";
+import { UrlBar } from "@/components/UrlBar";
+import { PreviewCard } from "@/components/PreviewCard";
+import { DownloadCard } from "@/components/DownloadCard";
+import { HistoryView } from "@/components/HistoryView";
+import { SettingsView } from "@/components/SettingsView";
 
-type Format = "mp3" | "mp4";
-type Stage = "idle" | "loading-info" | "ready" | "downloading" | "done" | "error";
+const HISTORY_STORAGE_KEY = "ud_history_v1";
 
-const MP3_QUALITIES = ["320", "192", "128"] as const;
-const MP4_QUALITIES = ["2160", "1440", "1080", "720", "480", "360"] as const;
+const PLATFORM_PATTERNS: Array<[string, RegExp]> = [
+  ["YouTube", /youtu/i],
+  ["TikTok", /tiktok/i],
+  ["Instagram", /instagram/i],
+  ["X", /twitter|x\.com/i],
+  ["Facebook", /facebook|fb\./i],
+  ["SoundCloud", /soundcloud/i],
+];
+
+function detectPlatformName(url: string): string {
+  const found = PLATFORM_PATTERNS.find(([, re]) => re.test(url));
+  return found ? found[0] : "";
+}
+
+function mapSelectionToFormatQuality(
+  mode: "Video" | "Audio",
+  selectedOption: string
+): { format: DownloadFormat; quality: string } {
+  if (mode === "Audio") {
+    if (selectedOption === "M4A") return { format: "m4a", quality: "0" };
+    if (selectedOption === "OPUS") return { format: "opus", quality: "0" };
+    return { format: "mp3", quality: "320" };
+  }
+  const q = selectedOption.replace(/p$/i, "") || "1080";
+  return { format: "mp4", quality: q };
+}
+
+function formatHistoryLabel(item: QueueItem): string {
+  if (item.format === "m4a") return "M4A";
+  if (item.format === "opus") return "OPUS";
+  if (item.format === "mp3") return `MP3 ${item.quality.replace(/k$/i, "") || "320"}k`;
+  return `${item.quality.replace(/p$/i, "") || "1080"}p`;
+}
 
 export default function Home() {
-  const [mode, setMode] = useState<"single" | "batch">("single");
-
-  // Single URL state
+  const [activeView, setActiveView] = useState<SidebarView>("dl");
   const [url, setUrl] = useState("");
-  const [format, setFormat] = useState<Format>("mp4");
-  const [quality, setQuality] = useState("1080");
-  const [info, setInfo] = useState<MediaInfo | null>(null);
-  const [stage, setStage] = useState<Stage>("idle");
-  const [progress, setProgress] = useState(0);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [detectedPlatform, setDetectedPlatform] = useState("");
+  const [loadingInfo, setLoadingInfo] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const [info, setInfo] = useState<MediaInfo | null>(null);
+  const [mode, setMode] = useState<"Video" | "Audio">("Video");
+  const [selectedOption, setSelectedOption] = useState("1080p");
+  const [startingDownload, setStartingDownload] = useState(false);
 
-  // Batch / Queue state
-  const [batchUrls, setBatchUrls] = useState("");
-  const [batchFormat, setBatchFormat] = useState<Format>("mp4");
-  const [batchQuality, setBatchQuality] = useState("1080");
-  const [isSubmittingBatch, setIsSubmittingBatch] = useState(false);
-  const [batchError, setBatchError] = useState("");
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [settings, setSettings] = useState<AppSettings>({
+    autoDetectClipboard: true,
+    minimizeToTray: true,
+    notifyWhenFinished: true,
+    maxConcurrent: 3,
+    saveFolder: "Downloads\\Universal Downloader",
+    theme: "dark",
+  });
 
-  // SSE stream for queue updates
+  const completedIdsRef = useRef<Set<string>>(new Set());
+  const settingsRef = useRef<AppSettings>(settings);
+  settingsRef.current = settings;
+
+  // Load history from localStorage, and settings from Electron IPC / backend
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (raw) {
+        const parsed: HistoryItem[] = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setHistoryItems(parsed);
+          parsed.forEach((h) => completedIdsRef.current.add(h.id));
+        }
+      }
+    } catch {}
+
+    getAppSettings().then((loaded) => {
+      setSettings(loaded);
+      document.documentElement.dataset.theme = loaded.theme || "dark";
+    });
+
+    if (typeof window !== "undefined" && window.electronAPI) {
+      return window.electronAPI.onSettingsUpdated((updated) => {
+        setSettings(updated);
+        if (updated.theme) {
+          document.documentElement.dataset.theme = updated.theme;
+        }
+      });
+    }
+  }, []);
+
+  // Connect to SSE stream for Queue updates
   useEffect(() => {
     let es: EventSource | null = null;
     try {
       es = new EventSource(getQueueStreamUrl());
       es.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          if (Array.isArray(data)) {
-            setQueueItems(data);
+          const data: QueueItem[] = JSON.parse(event.data);
+          if (!Array.isArray(data)) return;
+          setQueueItems(data);
+
+          const newlyFinished: HistoryItem[] = [];
+          for (const item of data) {
+            const isDone = item.status === "completed" || item.status === "done";
+            if (isDone && !completedIdsRef.current.has(item.id)) {
+              completedIdsRef.current.add(item.id);
+              newlyFinished.push({
+                id: item.id,
+                url: item.url,
+                title: item.title || item.url,
+                format: item.format,
+                quality: item.quality,
+                label: formatHistoryLabel(item),
+                platform: item.platform,
+                filename: item.filename,
+                completedAt: Date.now(),
+              });
+              if (settingsRef.current.notifyWhenFinished) {
+                triggerDesktopNotification(
+                  "Download finished",
+                  item.title || item.url
+                ).catch(() => {});
+              }
+            }
           }
-        } catch (err) {
-          console.error("SSE parse error", err);
-        }
+
+          if (newlyFinished.length > 0) {
+            setHistoryItems((prev) => {
+              const updated = [...newlyFinished, ...prev].slice(0, 100);
+              try {
+                localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          }
+        } catch {}
       };
-      es.onerror = () => {
-        // EventSource will automatically reconnect
-      };
-    } catch (err) {
-      console.error("Failed to connect to SSE", err);
-    }
+    } catch {}
 
     return () => {
-      if (es) {
-        es.close();
-      }
+      if (es) es.close();
     };
   }, []);
 
-  // Listen for clipboard detection from Electron
+  const handleFetchInfo = useCallback(
+    async (overrideUrl?: string) => {
+      const targetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
+      setInfo(null);
+      if (!/^https?:\/\/\S+\.\S+/i.test(targetUrl)) {
+        setErrorMsg(
+          "That doesn't look like a link. Paste a full URL starting with https://"
+        );
+        return;
+      }
+      setErrorMsg("");
+      const plat = detectPlatformName(targetUrl);
+      setDetectedPlatform(plat);
+      setLoadingInfo(true);
+      try {
+        const media = await fetchInfo(targetUrl);
+        setInfo(media);
+        if (!plat && media.platform) {
+          setDetectedPlatform(media.platform);
+        }
+        const hasVideo = media.formats?.some((f) => f.resolution && f.resolution !== "audio");
+        if (!hasVideo || media.platform === "soundcloud") {
+          setMode("Audio");
+          setSelectedOption("MP3 320k");
+        } else {
+          setMode("Video");
+          setSelectedOption("1080p");
+        }
+      } catch (e: unknown) {
+        setErrorMsg(e instanceof Error ? e.message : "Failed to fetch link info");
+      } finally {
+        setLoadingInfo(false);
+      }
+    },
+    [url]
+  );
+
+  // Listen for clipboard URL detection from Electron
   useEffect(() => {
     function handleClipboard(e: Event) {
+      if (!settingsRef.current.autoDetectClipboard) return;
       const customEvent = e as CustomEvent<string>;
-      const detectedUrl = customEvent.detail;
-      if (!detectedUrl) return;
-
-      if (mode === "single") {
-        setUrl(detectedUrl);
-      } else {
-        setBatchUrls((prev) => {
-          const lines = prev.split("\n").map((l) => l.trim()).filter(Boolean);
-          if (!lines.includes(detectedUrl)) {
-            return prev.trim() ? `${prev.trim()}\n${detectedUrl}` : detectedUrl;
-          }
-          return prev;
-        });
-      }
+      const detected = customEvent.detail;
+      if (!detected) return;
+      setUrl(detected);
+      setDetectedPlatform(detectPlatformName(detected));
+      setActiveView("dl");
+      handleFetchInfo(detected);
     }
 
     window.addEventListener("clipboard-url-detected", handleClipboard);
     return () => window.removeEventListener("clipboard-url-detected", handleClipboard);
-  }, [mode]);
+  }, [handleFetchInfo]);
 
-  function handleFormatChange(f: Format) {
-    setFormat(f);
-    setQuality(f === "mp3" ? "320" : "1080");
-  }
+  const handleUrlChange = (val: string) => {
+    setUrl(val);
+    setDetectedPlatform(detectPlatformName(val));
+    if (errorMsg) setErrorMsg("");
+  };
 
-  function handleBatchFormatChange(f: Format) {
-    setBatchFormat(f);
-    setBatchQuality(f === "mp3" ? "320" : "1080");
-  }
-
-  async function handleFetchInfo() {
-    if (!url.trim()) return;
-    setStage("loading-info");
-    setInfo(null);
-    setErrorMsg("");
+  const handlePaste = async () => {
     try {
-      const data = await fetchInfo(url.trim());
-      setInfo(data);
-      setStage("ready");
-    } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
-      setStage("error");
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) {
+        setUrl(text);
+        setDetectedPlatform(detectPlatformName(text));
+        await handleFetchInfo(text);
+      }
+    } catch {
+      setErrorMsg("Clipboard access was blocked. Paste with Ctrl+V instead.");
     }
-  }
+  };
 
-  async function handleDownload() {
-    if (!url || !info) return;
-    setStage("downloading");
-    setProgress(0);
+  const handleModeChange = (nextMode: "Video" | "Audio") => {
+    setMode(nextMode);
+    setSelectedOption(nextMode === "Video" ? "1080p" : "MP3 320k");
+  };
+
+  const handleStartDownload = async () => {
+    if (!info || !url.trim()) return;
+    setStartingDownload(true);
     setErrorMsg("");
     try {
-      const { job_id } = await startDownload(url.trim(), format, quality, info.title);
-      setJobId(job_id);
-      pollRef.current = setInterval(async () => {
-        const status: JobStatus = await pollProgress(job_id);
-        setProgress(status.progress);
-        if (status.status === "done") {
-          clearInterval(pollRef.current!);
-          setProgress(100);
-          setStage("done");
-        } else if (status.status === "error") {
-          clearInterval(pollRef.current!);
-          setErrorMsg(status.error || "Download failed");
-          setStage("error");
-        }
-      }, 1500);
+      const { format, quality } = mapSelectionToFormatQuality(mode, selectedOption);
+      await enqueueDownload(url.trim(), format, quality, info.title);
+      setActiveView("q");
     } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
-      setStage("error");
-    }
-  }
-
-  function handleReset() {
-    if (pollRef.current) clearInterval(pollRef.current);
-    setUrl("");
-    setInfo(null);
-    setStage("idle");
-    setProgress(0);
-    setJobId(null);
-    setErrorMsg("");
-    setFormat("mp4");
-    setQuality("720");
-  }
-
-  async function handleAddBatch() {
-    const urls = batchUrls
-      .split("\n")
-      .map((u) => u.trim())
-      .filter((u) => u.length > 0);
-    if (urls.length === 0) return;
-
-    setIsSubmittingBatch(true);
-    setBatchError("");
-    try {
-      await addBatchToQueue(urls, batchFormat, batchQuality);
-      setBatchUrls("");
-    } catch (e: unknown) {
-      setBatchError(e instanceof Error ? e.message : "Failed to add to queue");
+      setErrorMsg(e instanceof Error ? e.message : "Failed to start download");
     } finally {
-      setIsSubmittingBatch(false);
+      setStartingDownload(false);
     }
-  }
+  };
 
-  const singleQualities = format === "mp3" ? MP3_QUALITIES : MP4_QUALITIES;
-  const batchQualities = batchFormat === "mp3" ? MP3_QUALITIES : MP4_QUALITIES;
+  const handleCancelQueueItem = async (jobId: string) => {
+    setQueueItems((prev) => prev.filter((i) => i.id !== jobId));
+    try {
+      await cancelQueueItem(jobId);
+    } catch {}
+  };
+
+  const handleRedownload = async (item: HistoryItem) => {
+    try {
+      await enqueueDownload(item.url, item.format, item.quality, item.title);
+      setActiveView("q");
+    } catch {}
+  };
+
+  const handleOpenFolder = async (filepath?: string) => {
+    try {
+      await openSaveFolder(filepath);
+    } catch {}
+  };
+
+  const handleUpdateSettings = async (patch: Partial<AppSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    if (patch.theme) {
+      document.documentElement.dataset.theme = patch.theme;
+    }
+    const saved = await updateAppSettings(patch);
+    setSettings(saved);
+  };
+
+  const handlePickFolder = async () => {
+    const updated = await pickSaveFolder();
+    setSettings(updated);
+  };
+
+  const handleToggleTheme = () => {
+    const currentTheme =
+      document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const nextTheme = currentTheme === "dark" ? "light" : "dark";
+    handleUpdateSettings({ theme: nextTheme });
+  };
+
+  const activeQueueCount = queueItems.filter(
+    (i) => i.status === "queued" || i.status === "downloading"
+  ).length;
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-start py-16 px-4">
-      {/* Header */}
-      <div className="mb-8 text-center">
-        <h1 className="text-4xl font-bold tracking-tight mb-2">
-          Universal <span className="text-violet-400">Downloader</span>
-        </h1>
-        <p className="text-gray-400 text-sm">
-          YouTube · TikTok · Instagram · Twitter/X · Facebook · SoundCloud
-        </p>
-      </div>
+    <>
+      <SvgSprite />
+      <div className="app">
+        <Sidebar
+          activeView={activeView}
+          onSelectView={setActiveView}
+          activeQueueCount={activeQueueCount}
+          onToggleTheme={handleToggleTheme}
+          versionText="v0.2.0 · Pro"
+        />
 
-      {/* Main Card */}
-      <div className="w-full max-w-2xl bg-gray-900 rounded-2xl shadow-2xl p-8 space-y-6">
-        {/* Mode Tabs */}
-        <div className="flex border-b border-gray-800 pb-3 gap-6 text-sm font-semibold">
-          <button
-            onClick={() => setMode("single")}
-            className={`transition pb-1 border-b-2 ${
-              mode === "single"
-                ? "border-violet-500 text-violet-400"
-                : "border-transparent text-gray-400 hover:text-gray-200"
-            }`}
-          >
-            Single Download
-          </button>
-          <button
-            onClick={() => setMode("batch")}
-            className={`transition pb-1 border-b-2 ${
-              mode === "batch"
-                ? "border-violet-500 text-violet-400"
-                : "border-transparent text-gray-400 hover:text-gray-200"
-            }`}
-          >
-            Batch / Queue
-          </button>
-        </div>
-
-        {/* SINGLE MODE */}
-        {mode === "single" && (
-          <div className="space-y-6">
-            {/* URL Input */}
-            <div className="flex gap-2">
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleFetchInfo()}
-                placeholder="Paste video / audio URL here…"
-                disabled={stage === "loading-info" || stage === "downloading"}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-violet-500 transition disabled:opacity-50"
-              />
-              <button
-                onClick={handleFetchInfo}
-                disabled={!url.trim() || stage === "loading-info" || stage === "downloading"}
-                className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 rounded-xl px-5 py-3 text-sm font-semibold transition"
-              >
-                {stage === "loading-info" ? "Loading…" : "Fetch"}
-              </button>
-            </div>
-
-            {/* Media Info Preview */}
-            {info && (stage === "ready" || stage === "downloading" || stage === "done") && (
-              <div className="flex gap-4 items-start bg-gray-800 rounded-xl p-4">
-                {info.thumbnail && (
-                  <div className="relative w-28 h-16 flex-shrink-0 rounded-lg overflow-hidden">
-                    <Image
-                      src={info.thumbnail}
-                      alt="thumbnail"
-                      fill
-                      className="object-cover"
-                      unoptimized
-                    />
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm leading-snug line-clamp-2">{info.title}</p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {info.uploader && <span>{info.uploader}</span>}
-                    {info.duration && (
-                      <span className="ml-2">
-                        {Math.floor(info.duration / 60)}:{String(info.duration % 60).padStart(2, "0")}
-                      </span>
-                    )}
-                    {info.platform && (
-                      <span className="ml-2 capitalize text-violet-400">{info.platform}</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Format + Quality */}
-            {(stage === "ready" || stage === "downloading" || stage === "done") && (
-              <div className="space-y-4">
-                {/* Format Toggle */}
-                <div className="flex rounded-xl overflow-hidden border border-gray-700">
-                  {(["mp4", "mp3"] as Format[]).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => handleFormatChange(f)}
-                      disabled={stage === "downloading"}
-                      className={`flex-1 py-2.5 text-sm font-semibold transition ${
-                        format === f
-                          ? "bg-violet-600 text-white"
-                          : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                      } disabled:opacity-50`}
-                    >
-                      {f.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Quality */}
-                <div className="flex gap-2 flex-wrap">
-                  {singleQualities.map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => setQuality(q)}
-                      disabled={stage === "downloading"}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium border transition ${
-                        quality === q
-                          ? "border-violet-500 bg-violet-900/40 text-violet-300"
-                          : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500"
-                      } disabled:opacity-50`}
-                    >
-                      {format === "mp3" ? `${q} kbps` : `${q}p`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Progress Bar */}
-            {stage === "downloading" && (
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-gray-400">
-                  <span>Processing…</span>
-                  <span>{progress.toFixed(0)}%</span>
-                </div>
-                <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-violet-500 transition-all duration-500 rounded-full"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Error */}
-            {stage === "error" && (
-              <div className="bg-red-900/30 border border-red-700 text-red-300 text-sm rounded-xl px-4 py-3">
-                ⚠ {errorMsg}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="flex gap-3">
-              {stage === "ready" && (
-                <button
-                  onClick={handleDownload}
-                  className="flex-1 bg-violet-600 hover:bg-violet-500 rounded-xl py-3 text-sm font-semibold transition"
-                >
-                  Download {format.toUpperCase()}
-                </button>
-              )}
-
-              {stage === "done" && jobId && (
-                <a
-                  href={getFileUrl(jobId)}
-                  download={info?.title ? `${info.title}.${format}` : undefined}
-                  className="flex-1 text-center bg-green-600 hover:bg-green-500 rounded-xl py-3 text-sm font-semibold transition"
-                >
-                  ✓ Save File
-                </a>
-              )}
-
-              {(stage === "ready" || stage === "done" || stage === "error") && (
-                <button
-                  onClick={handleReset}
-                  className="px-5 py-3 bg-gray-800 hover:bg-gray-700 rounded-xl text-sm text-gray-400 transition"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* BATCH MODE */}
-        {mode === "batch" && (
-          <div className="space-y-5">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">
-                Enter video or audio URLs (one per line):
-              </label>
-              <textarea
-                rows={5}
-                value={batchUrls}
-                onChange={(e) => setBatchUrls(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=...&#10;https://www.tiktok.com/@user/video/...&#10;https://www.instagram.com/reel/..."
-                disabled={isSubmittingBatch}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-violet-500 transition disabled:opacity-50 resize-y font-mono"
-              />
-            </div>
-
-            {/* Batch Format Toggle */}
-            <div className="space-y-3">
-              <div className="flex rounded-xl overflow-hidden border border-gray-700">
-                {(["mp4", "mp3"] as Format[]).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => handleBatchFormatChange(f)}
-                    disabled={isSubmittingBatch}
-                    className={`flex-1 py-2.5 text-sm font-semibold transition ${
-                      batchFormat === f
-                        ? "bg-violet-600 text-white"
-                        : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                    } disabled:opacity-50`}
-                  >
-                    {f.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-
-              {/* Batch Quality */}
-              <div className="flex gap-2 flex-wrap">
-                {batchQualities.map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => setBatchQuality(q)}
-                    disabled={isSubmittingBatch}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium border transition ${
-                      batchQuality === q
-                        ? "border-violet-500 bg-violet-900/40 text-violet-300"
-                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500"
-                    } disabled:opacity-50`}
-                  >
-                    {batchFormat === "mp3" ? `${q} kbps` : `${q}p`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Batch Error */}
-            {batchError && (
-              <div className="bg-red-900/30 border border-red-700 text-red-300 text-sm rounded-xl px-4 py-3">
-                ⚠ {batchError}
-              </div>
-            )}
-
-            <button
-              onClick={handleAddBatch}
-              disabled={!batchUrls.trim() || isSubmittingBatch}
-              className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 rounded-xl py-3 text-sm font-semibold transition"
+        <main>
+          <div className="wrap">
+            {/* Download View */}
+            <section
+              className={`v ${activeView === "dl" ? "show" : ""}`}
+              id="v-dl"
             >
-              {isSubmittingBatch ? "Adding to Queue…" : "Add to Download Queue"}
-            </button>
-          </div>
-        )}
-      </div>
+              <h1>
+                Paste a link. <span>Get the file.</span>
+              </h1>
+              <p className="sub">
+                One place for every video and audio link - fast, private, and on
+                your own PC.
+              </p>
 
-      {/* QUEUE CARDS SECTION */}
-      {queueItems.length > 0 && (
-        <div className="w-full max-w-2xl mt-8 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold flex items-center gap-2">
-              <span>Download Queue</span>
-              <span className="text-xs bg-violet-950 text-violet-300 border border-violet-800 px-2 py-0.5 rounded-full font-mono">
-                {queueItems.length}
-              </span>
-            </h2>
-          </div>
+              <div className="card">
+                <UrlBar
+                  url={url}
+                  onChange={handleUrlChange}
+                  onFetch={handleFetchInfo}
+                  onPaste={handlePaste}
+                  loading={loadingInfo}
+                  detectedPlatform={detectedPlatform}
+                  error={errorMsg}
+                />
 
-          <div className="space-y-3">
-            {queueItems.map((item) => {
-              const isCompleted = item.status === "completed" || item.status === "done";
-              return (
-                <div
-                  key={item.id}
-                  className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col gap-3 shadow-lg"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className="text-sm font-medium text-white truncate"
-                        title={item.title || item.url}
-                      >
-                        {item.title || item.url}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <span className="text-xs uppercase bg-gray-800 text-gray-300 px-2 py-0.5 rounded font-mono">
-                          {item.format} · {item.format === "mp3" ? `${item.quality}kbps` : `${item.quality}p`}
-                        </span>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded font-medium ${
-                            isCompleted
-                              ? "bg-green-950 text-green-400 border border-green-800"
-                              : item.status === "downloading"
-                              ? "bg-violet-950 text-violet-300 border border-violet-800 animate-pulse"
-                              : item.status === "error"
-                              ? "bg-red-950 text-red-400 border border-red-800"
-                              : "bg-gray-800 text-gray-400 border border-gray-700"
-                          }`}
-                        >
-                          {isCompleted
-                            ? "✓ Completed"
-                            : item.status === "downloading"
-                            ? "Downloading…"
-                            : item.status === "error"
-                            ? "Failed"
-                            : "Queued"}
-                        </span>
-                      </div>
-                    </div>
+                {info && (
+                  <PreviewCard
+                    info={info}
+                    mode={mode}
+                    onModeChange={handleModeChange}
+                    selectedOption={selectedOption}
+                    onSelectOption={setSelectedOption}
+                    saveFolder={settings.saveFolder}
+                    onDownload={handleStartDownload}
+                    downloading={startingDownload}
+                  />
+                )}
+              </div>
 
-                    {/* Save File Button */}
-                    {isCompleted && (
-                      <a
-                        href={getFileUrl(item.id)}
-                        download
-                        className="bg-green-600 hover:bg-green-500 text-white text-xs px-4 py-2 rounded-lg font-semibold transition shrink-0 self-center"
-                      >
-                        ✓ Save File
-                      </a>
-                    )}
+              <div className="hint">
+                <Icon name="c" />
+                Tip: copy a link and it&apos;s detected automatically.
+              </div>
+            </section>
+
+            {/* Queue View */}
+            <section
+              className={`v ${activeView === "q" ? "show" : ""}`}
+              id="v-q"
+            >
+              <h2>Queue</h2>
+              <div id="ql">
+                {queueItems.length === 0 ? (
+                  <div className="empty">
+                    Nothing downloading. Paste a link to start.
                   </div>
+                ) : (
+                  queueItems.map((item) => (
+                    <DownloadCard
+                      key={item.id}
+                      item={item}
+                      onCancel={handleCancelQueueItem}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
 
-                  {/* Progress bar */}
-                  {item.status === "downloading" && (
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs text-gray-400 font-mono">
-                        <span>Downloading…</span>
-                        <span>{item.progress.toFixed(0)}%</span>
-                      </div>
-                      <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-violet-500 transition-all duration-300 rounded-full"
-                          style={{ width: `${item.progress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
+            {/* History View */}
+            <section
+              className={`v ${activeView === "h" ? "show" : ""}`}
+              id="v-h"
+            >
+              <HistoryView
+                items={historyItems}
+                onOpenFolder={handleOpenFolder}
+                onRedownload={handleRedownload}
+              />
+            </section>
 
-                  {/* Error display */}
-                  {item.status === "error" && item.error && (
-                    <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg p-2 font-mono">
-                      {item.error}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+            {/* Settings View */}
+            <section
+              className={`v ${activeView === "s" ? "show" : ""}`}
+              id="v-s"
+            >
+              <SettingsView
+                settings={settings}
+                onUpdate={handleUpdateSettings}
+                onPickFolder={handlePickFolder}
+              />
+            </section>
+
           </div>
-        </div>
-      )}
-
-      <p className="mt-8 text-xs text-gray-600">
-        Powered by yt-dlp + ffmpeg — for personal use only
-      </p>
-    </main>
+        </main>
+      </div>
+    </>
   );
 }

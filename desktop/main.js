@@ -1,9 +1,23 @@
-const { app, BrowserWindow, Tray, Menu, clipboard, nativeImage } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  clipboard,
+  nativeImage,
+  ipcMain,
+  dialog,
+  shell,
+  Notification,
+} = require("electron");
 const { spawn, execSync } = require("child_process");
+const crypto = require("crypto");
 const path = require("path");
 const net = require("net");
 const http = require("http");
 const fs = require("fs");
+
+const appSessionToken = crypto.randomBytes(32).toString("hex");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const BACKEND_DIR = path.join(ROOT_DIR, "backend");
@@ -20,7 +34,9 @@ function resolveAssetPath(relPath) {
 
 // 1. Resolve FFmpeg
 const bundledBin = resolveAssetPath("bin");
-const FFMPEG_BIN = bundledBin || "C:\\Users\\Dataria\\Downloads\\ffmpeg-2026-10-01-git-0b01ed76aa-essentials_build\\bin";
+const FFMPEG_BIN =
+  bundledBin ||
+  "C:\\Users\\Dataria\\Downloads\\ffmpeg-2026-10-01-git-0b01ed76aa-essentials_build\\bin";
 
 // 2. Resolve Backend Executable
 const bundledBackend = resolveAssetPath(path.join("backend-engine", "backend-engine.exe"));
@@ -28,6 +44,12 @@ const PYTHON_EXE = bundledBackend || path.join(BACKEND_DIR, ".venv", "Scripts", 
 
 // 3. Resolve Static Frontend
 const bundledFrontend = resolveAssetPath("frontend-out");
+
+// 4. Resolve App Icon
+const APP_ICON_PATH =
+  resolveAssetPath(path.join("assets", "icon.ico")) ||
+  resolveAssetPath(path.join("build", "icon.ico")) ||
+  path.join(__dirname, "assets", "icon.ico");
 
 // ไอคอน 16x16 สีฟ้าคราม (Base64 PNG) ป้องกัน Tray ล่องหนบน Windows 11
 const TRAY_ICON_DATA_URL =
@@ -38,9 +60,112 @@ let tray = null;
 let backendProc = null;
 let frontendProc = null;
 let staticServer = null;
+let activeBackendPort = null;
 let isQuitting = false;
-let clipboardWatchEnabled = true;
 let lastClipboardText = "";
+let settings = null;
+
+function getSettingsPath() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function getDefaultSettings() {
+  return {
+    autoDetectClipboard: true,
+    minimizeToTray: true,
+    notifyWhenFinished: true,
+    maxConcurrent: 3,
+    saveFolder: path.join(app.getPath("downloads"), "Universal Downloader"),
+    theme: "dark",
+  };
+}
+
+function loadSettings() {
+  const defaults = getDefaultSettings();
+  const file = getSettingsPath();
+  try {
+    if (fs.existsSync(file)) {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+      settings = {
+        autoDetectClipboard:
+          typeof parsed.autoDetectClipboard === "boolean"
+            ? parsed.autoDetectClipboard
+            : defaults.autoDetectClipboard,
+        minimizeToTray:
+          typeof parsed.minimizeToTray === "boolean"
+            ? parsed.minimizeToTray
+            : defaults.minimizeToTray,
+        notifyWhenFinished:
+          typeof parsed.notifyWhenFinished === "boolean"
+            ? parsed.notifyWhenFinished
+            : defaults.notifyWhenFinished,
+        maxConcurrent: [1, 2, 3, 5].includes(Number(parsed.maxConcurrent))
+          ? Number(parsed.maxConcurrent)
+          : defaults.maxConcurrent,
+        saveFolder:
+          typeof parsed.saveFolder === "string" && path.isAbsolute(parsed.saveFolder)
+            ? parsed.saveFolder
+            : defaults.saveFolder,
+        theme: parsed.theme === "light" ? "light" : "dark",
+      };
+    } else {
+      settings = defaults;
+      persistSettings();
+    }
+  } catch (_) {
+    settings = defaults;
+  }
+  return settings;
+}
+
+function persistSettings() {
+  try {
+    const file = getSettingsPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(settings, null, 2), "utf-8");
+  } catch (_) {}
+}
+
+function syncSettingsToBackend() {
+  if (!activeBackendPort || !settings) return;
+  const payload = JSON.stringify({
+    max_concurrent: settings.maxConcurrent,
+    save_folder: settings.saveFolder,
+  });
+  const req = http.request(
+    {
+      hostname: "127.0.0.1",
+      port: activeBackendPort,
+      path: "/api/settings",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+        "X-App-Token": appSessionToken,
+      },
+    },
+    (res) => {
+      res.resume();
+    }
+  );
+  req.on("error", () => {});
+  req.write(payload);
+  req.end();
+}
+
+function isWithinAllowedFolder(targetPath, allowedRoot) {
+  try {
+    fs.mkdirSync(allowedRoot, { recursive: true });
+    const realRoot = fs.realpathSync(allowedRoot).toLowerCase();
+    const realTarget = fs.realpathSync(targetPath).toLowerCase();
+    return (
+      realTarget === realRoot ||
+      realTarget.startsWith(realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep)
+    );
+  } catch (_) {
+    return false;
+  }
+}
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -74,10 +199,12 @@ function waitForServer(url, timeoutMs = 25000) {
   const start = Date.now();
   return new Promise((resolve) => {
     const check = () => {
-      http.get(url, (res) => {
-        if (res.statusCode < 500) return resolve(true);
-        retry();
-      }).on("error", retry);
+      http
+        .get(url, (res) => {
+          if (res.statusCode < 500) return resolve(true);
+          retry();
+        })
+        .on("error", retry);
     };
     const retry = () => {
       if (Date.now() - start > timeoutMs) return resolve(false);
@@ -92,6 +219,19 @@ function killProcessTree(proc) {
   try {
     execSync(`taskkill /PID ${proc.pid} /T /F`, { stdio: "ignore", windowsHide: true });
   } catch (_) {}
+}
+
+function cleanupChildProcesses() {
+  killProcessTree(backendProc);
+  backendProc = null;
+  killProcessTree(frontendProc);
+  frontendProc = null;
+  if (staticServer) {
+    try {
+      staticServer.close();
+    } catch (_) {}
+    staticServer = null;
+  }
 }
 
 function serveStaticFolder(folderPath, port) {
@@ -150,21 +290,26 @@ function serveStaticFolder(folderPath, port) {
 async function startServices() {
   const backendPort = await findFreePort(8000, 8010);
   const frontendPort = await findFreePort(3000, 3010);
+  activeBackendPort = backendPort;
 
   const envWithFfmpeg = {
     ...process.env,
     PATH: `${FFMPEG_BIN};${process.env.PATH || ""}`,
     NEXT_PUBLIC_API_URL: `http://127.0.0.1:${backendPort}/api`,
     PORT: String(frontendPort),
+    BACKEND_PORT: String(backendPort),
+    FRONTEND_PORT: String(frontendPort),
+    FRONTEND_ORIGIN: `http://127.0.0.1:${frontendPort},http://localhost:${frontendPort}`,
+    APP_SESSION_TOKEN: appSessionToken,
   };
 
-  // Launch Backend
+  // Launch Backend (strictly bound to 127.0.0.1)
   if (bundledBackend) {
-    backendProc = spawn(
-      bundledBackend,
-      ["--port", String(backendPort)],
-      { cwd: path.dirname(bundledBackend), env: envWithFfmpeg, windowsHide: true }
-    );
+    backendProc = spawn(bundledBackend, ["--port", String(backendPort)], {
+      cwd: path.dirname(bundledBackend),
+      env: envWithFfmpeg,
+      windowsHide: true,
+    });
   } else {
     backendProc = spawn(
       PYTHON_EXE,
@@ -177,23 +322,30 @@ async function startServices() {
   if (bundledFrontend) {
     staticServer = await serveStaticFolder(bundledFrontend, frontendPort);
   } else {
-    const nextCli = path.join(FRONTEND_DIR, "node_modules", "next", "dist", "bin", "next");
-    frontendProc = spawn(
-      process.execPath,
-      [nextCli, "start", "-p", String(frontendPort)],
-      { cwd: FRONTEND_DIR, env: { ...envWithFfmpeg, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true }
-    );
+    const outDir = path.join(FRONTEND_DIR, "out");
+    if (fs.existsSync(path.join(outDir, "index.html"))) {
+      staticServer = await serveStaticFolder(outDir, frontendPort);
+    } else {
+      const nextCli = path.join(FRONTEND_DIR, "node_modules", "next", "dist", "bin", "next");
+      frontendProc = spawn(process.execPath, [nextCli, "start", "-p", String(frontendPort)], {
+        cwd: FRONTEND_DIR,
+        env: { ...envWithFfmpeg, ELECTRON_RUN_AS_NODE: "1" },
+        windowsHide: true,
+      });
+    }
   }
 
   await waitForServer(`http://127.0.0.1:${backendPort}/docs`);
   await waitForServer(`http://127.0.0.1:${frontendPort}`);
+  syncSettingsToBackend();
   return { backendPort, frontendPort };
 }
 
 function startClipboardWatcher() {
-  const supportedRegex = /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com)\/.+/i;
+  const supportedRegex =
+    /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com)\/.+/i;
   setInterval(() => {
-    if (!clipboardWatchEnabled || !mainWindow) return;
+    if (!settings || !settings.autoDetectClipboard || !mainWindow) return;
     const text = (clipboard.readText() || "").trim();
     if (text && text !== lastClipboardText && supportedRegex.test(text)) {
       lastClipboardText = text;
@@ -206,7 +358,118 @@ function startClipboardWatcher() {
   }, 1500);
 }
 
+function updateTrayMenu() {
+  if (!tray || !settings) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Open Universal Downloader", click: () => mainWindow && mainWindow.show() },
+      {
+        label: "Clipboard Auto-Detect",
+        type: "checkbox",
+        checked: Boolean(settings.autoDetectClipboard),
+        click: (item) => {
+          settings.autoDetectClipboard = item.checked;
+          persistSettings();
+          if (mainWindow) {
+            mainWindow.webContents.send("settings:changed", settings);
+          }
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Quit Completely",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ])
+  );
+}
+
+function registerIpcHandlers() {
+  ipcMain.handle("app:token", () => {
+    return appSessionToken;
+  });
+
+  ipcMain.handle("settings:get", () => {
+    return settings || loadSettings();
+  });
+
+  ipcMain.handle("settings:update", (_event, patch) => {
+    if (!patch || typeof patch !== "object") return settings;
+    if (typeof patch.autoDetectClipboard === "boolean") {
+      settings.autoDetectClipboard = patch.autoDetectClipboard;
+    }
+    if (typeof patch.minimizeToTray === "boolean") {
+      settings.minimizeToTray = patch.minimizeToTray;
+    }
+    if (typeof patch.notifyWhenFinished === "boolean") {
+      settings.notifyWhenFinished = patch.notifyWhenFinished;
+    }
+    if ([1, 2, 3, 5].includes(Number(patch.maxConcurrent))) {
+      settings.maxConcurrent = Number(patch.maxConcurrent);
+    }
+    if (patch.theme === "light" || patch.theme === "dark") {
+      settings.theme = patch.theme;
+    }
+    persistSettings();
+    syncSettingsToBackend();
+    updateTrayMenu();
+    return settings;
+  });
+
+  ipcMain.handle("dialog:pick-folder", async () => {
+    if (!mainWindow) return settings;
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: "Select Save Folder",
+      defaultPath: settings.saveFolder,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (!res.canceled && res.filePaths && res.filePaths[0]) {
+      settings.saveFolder = path.resolve(res.filePaths[0]);
+      persistSettings();
+      syncSettingsToBackend();
+    }
+    return settings;
+  });
+
+  ipcMain.handle("shell:open-folder", async (_event, targetPath) => {
+    const allowedRoot = settings.saveFolder;
+    fs.mkdirSync(allowedRoot, { recursive: true });
+    if (targetPath && typeof targetPath === "string" && isWithinAllowedFolder(targetPath, allowedRoot)) {
+      const realTarget = fs.realpathSync(targetPath);
+      if (fs.existsSync(realTarget) && fs.statSync(realTarget).isFile()) {
+        shell.showItemInFolder(realTarget);
+        return { opened: realTarget };
+      }
+      await shell.openPath(realTarget);
+      return { opened: realTarget };
+    }
+    const realRoot = fs.realpathSync(allowedRoot);
+    await shell.openPath(realRoot);
+    return { opened: realRoot };
+  });
+
+  ipcMain.handle("notification:show", (_event, payload) => {
+    if (!settings || !settings.notifyWhenFinished) return false;
+    if (Notification.isSupported() && payload && payload.title) {
+      new Notification({
+        title: String(payload.title),
+        body: payload.body ? String(payload.body) : "",
+      }).show();
+      return true;
+    }
+    return false;
+  });
+}
+
 app.whenReady().then(async () => {
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.universaldownloader.app");
+  }
+  loadSettings();
+  registerIpcHandlers();
   const { backendPort, frontendPort } = await startServices();
 
   mainWindow = new BrowserWindow({
@@ -215,61 +478,52 @@ app.whenReady().then(async () => {
     minWidth: 820,
     minHeight: 620,
     title: "Universal Downloader",
+    icon: APP_ICON_PATH,
     autoHideMenuBar: true,
-    backgroundColor: "#09090b",
+    backgroundColor: "#060912",
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
 
-  mainWindow.loadURL(`http://localhost:${frontendPort}?api_port=${backendPort}`);
+  mainWindow.loadURL(
+    `http://localhost:${frontendPort}?api_port=${backendPort}&token=${appSessionToken}`
+  );
 
   mainWindow.on("close", (e) => {
-    if (!isQuitting) {
+    if (!isQuitting && settings && settings.minimizeToTray) {
       e.preventDefault();
       mainWindow.hide();
+    } else {
+      isQuitting = true;
+      cleanupChildProcesses();
+      app.quit();
     }
   });
 
-  const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
-  tray = new Tray(icon);
+  const trayIcon =
+    APP_ICON_PATH && fs.existsSync(APP_ICON_PATH)
+      ? nativeImage.createFromPath(APP_ICON_PATH)
+      : nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
+  tray = new Tray(trayIcon);
   tray.setToolTip("Universal Downloader");
-
-  const updateTrayMenu = () => {
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: "Open Universal Downloader", click: () => mainWindow.show() },
-        {
-          label: "Clipboard Auto-Detect",
-          type: "checkbox",
-          checked: clipboardWatchEnabled,
-          click: (item) => {
-            clipboardWatchEnabled = item.checked;
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Quit Completely",
-          click: () => {
-            isQuitting = true;
-            app.quit();
-          },
-        },
-      ])
-    );
-  };
   updateTrayMenu();
-  tray.on("click", () => mainWindow.show());
+  tray.on("click", () => mainWindow && mainWindow.show());
 
   startClipboardWatcher();
 });
 
+app.on("window-all-closed", () => {
+  if (!settings || !settings.minimizeToTray) {
+    isQuitting = true;
+    cleanupChildProcesses();
+    app.quit();
+  }
+});
+
 app.on("before-quit", () => {
   isQuitting = true;
-  killProcessTree(backendProc);
-  killProcessTree(frontendProc);
-  if (staticServer) {
-    try { staticServer.close(); } catch (_) {}
-  }
+  cleanupChildProcesses();
 });

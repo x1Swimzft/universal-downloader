@@ -2,11 +2,64 @@ import asyncio
 import uuid
 import os
 import re
+import socket
+import ipaddress
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from typing import Dict, Any, Optional
 import yt_dlp
 
 from app.models.schemas import MediaInfo, FormatOption
+
+
+def is_private_or_loopback_ip(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or not ip.is_global
+        )
+    except ValueError:
+        return False
+
+
+def validate_url_not_private(url_str: str) -> bool:
+    """Ensure URL is not pointing to private/loopback/link-local addresses."""
+    if not url_str or not isinstance(url_str, str):
+        return False
+    try:
+        clean = url_str.strip()
+        parsed = urlparse(clean)
+        scheme = parsed.scheme.lower()
+        if scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        # Check explicit loopback hostnames
+        if hostname.lower() in ("localhost", "localhost.", "127.0.0.1", "::1"):
+            return False
+
+        # If it's an IP literal
+        try:
+            ip = ipaddress.ip_address(hostname)
+            return not is_private_or_loopback_ip(str(ip))
+        except ValueError:
+            pass
+
+        # Resolve via DNS
+        addr_info = socket.getaddrinfo(hostname, None)
+        for _, _, _, _, sockaddr in addr_info:
+            ip_addr = sockaddr[0]
+            if is_private_or_loopback_ip(ip_addr):
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def _clean_url(url: str) -> str:
@@ -34,6 +87,10 @@ def _clean_url(url: str) -> str:
                 if "v" in query_params:
                     clean_query = urlencode({"v": query_params["v"][0]})
                     return f"https://www.youtube.com/watch?{clean_query}"
+        # Handle TikTok photo/slideshow URLs -> map to /video/ so extractor matches
+        if "tiktok.com" in netloc and "/photo/" in parsed.path:
+            clean_path = parsed.path.replace("/photo/", "/video/")
+            return urlunparse(parsed._replace(path=clean_path))
     except Exception:
         pass
 
@@ -73,6 +130,8 @@ def _get_base_opts(url: str = "") -> Dict[str, Any]:
 
 async def extract_info(url: str) -> MediaInfo:
     """Extract metadata without downloading."""
+    if not validate_url_not_private(url):
+        raise ValueError("Invalid or private URL not allowed")
     clean_url = _clean_url(url)
     ydl_opts = _get_base_opts(clean_url)
     ydl_opts["skip_download"] = True
@@ -119,10 +178,13 @@ async def extract_info(url: str) -> MediaInfo:
                 )
             )
 
+    raw_duration = info.get("duration")
+    duration = round(raw_duration) if isinstance(raw_duration, (int, float)) else None
+
     return MediaInfo(
         title=info.get("title", "Unknown"),
         thumbnail=info.get("thumbnail"),
-        duration=info.get("duration"),
+        duration=duration,
         uploader=info.get("uploader") or info.get("channel") or info.get("creator"),
         platform=_extract_platform(clean_url),
         formats=formats,
@@ -147,25 +209,46 @@ def _build_ydl_opts(
         }
     )
 
-    if fmt == "mp3":
+    if fmt in ("mp3", "m4a", "opus"):
         opts["format"] = "bestaudio/best"
         opts["postprocessors"].append(
             {
                 "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": quality,
+                "preferredcodec": fmt,
+                "preferredquality": quality if fmt == "mp3" else "0",
             }
         )
     else:  # mp4
-        height = quality
-        # Robust fallback ladder: quality-capped -> best video+audio -> best overall
-        opts["format"] = (
-            f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]"
-            f"/bestvideo[height<={height}]+bestaudio"
-            f"/best[height<={height}]"
-            f"/bestvideo+bestaudio"
-            f"/best"
-        )
+        height = quality.rstrip("p") if quality else "1080"
+        if not height.isdigit():
+            height = "1080"
+        h = str(height)
+        val = int(h)
+
+        if val > 1080:
+            # 4K / 2K resolutions: YouTube only provides VP9/AV1. Select genuine >1080p stream first, then fall back
+            opts["format"] = (
+                f"bestvideo[height>{1080}][height<={h}]+bestaudio[ext=m4a]"
+                f"/bestvideo[height>{1080}][height<={h}]+bestaudio"
+                f"/bestvideo[height<={h}][vcodec^=avc1]+bestaudio[ext=m4a]"
+                f"/bestvideo[height<={h}][vcodec^=avc1]+bestaudio"
+                f"/bestvideo[height<={h}]+bestaudio[ext=m4a]"
+                f"/bestvideo[height<={h}]+bestaudio"
+                f"/best[height<={h}]"
+                f"/bestvideo+bestaudio"
+                f"/best"
+            )
+        else:
+            # <= 1080p: Prioritize compatible H.264 (avc1) + AAC (m4a), with graceful fallbacks
+            opts["format"] = (
+                f"bestvideo[height<={h}][vcodec^=avc1]+bestaudio[ext=m4a]"
+                f"/bestvideo[height<={h}][vcodec^=avc1]+bestaudio"
+                f"/bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]"
+                f"/bestvideo[height<={h}]+bestaudio"
+                f"/best[height<={h}]"
+                f"/bestvideo+bestaudio"
+                f"/best"
+            )
 
     return opts
 
@@ -177,20 +260,31 @@ async def download_media(
     tmp_dir: str,
     job_store: Dict[str, Any],
     job_id: str,
+    cancel_event: Optional[asyncio.Event] = None,
 ) -> tuple[str, str]:
     """Download and convert media. Returns (final file path, title)."""
+    if not validate_url_not_private(url):
+        raise ValueError("Invalid or private URL not allowed")
     clean_url = _clean_url(url)
     filename_template = f"{job_id}.%(ext)s"
     output_path = os.path.join(tmp_dir, filename_template)
 
     def progress_hook(d):
+        if cancel_event and cancel_event.is_set():
+            raise yt_dlp.utils.DownloadError("Cancelled by user")
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             downloaded = d.get("downloaded_bytes", 0)
             pct = (downloaded / total * 100) if total else 0
-            job_store[job_id]["progress"] = round(pct, 1)
+            speed_bps = d.get("speed") or 0
+            if job_id in job_store:
+                job_store[job_id]["progress"] = round(pct, 1)
+                job_store[job_id]["speed"] = round(speed_bps / (1024 * 1024), 1) if speed_bps else 0.0
         elif d["status"] == "finished":
-            job_store[job_id]["progress"] = 99.0
+            if cancel_event and cancel_event.is_set():
+                raise yt_dlp.utils.DownloadError("Cancelled by user")
+            if job_id in job_store:
+                job_store[job_id]["progress"] = 99.0
 
     ydl_opts = _build_ydl_opts(fmt, quality, output_path, progress_hook, clean_url)
 
@@ -203,14 +297,19 @@ async def download_media(
 
     extracted_title = await loop.run_in_executor(None, _download)
 
+    if cancel_event and cancel_event.is_set():
+        raise yt_dlp.utils.DownloadError("Cancelled by user")
+
     for f in os.listdir(tmp_dir):
-        if f.startswith(job_id):
+        if f.startswith(job_id) and not f.endswith((".part", ".ytdl")):
             return os.path.join(tmp_dir, f), extracted_title
 
     raise FileNotFoundError(f"Output file not found for job {job_id}")
 
 
 async def get_direct_stream_url(url: str, height: Optional[str] = None) -> Optional[dict]:
+    if not validate_url_not_private(url):
+        return None
     clean_url = _clean_url(url)
     ydl_opts = _get_base_opts(clean_url)
     loop = asyncio.get_event_loop()

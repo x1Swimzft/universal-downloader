@@ -9,8 +9,20 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        bg: "var(--bg)",
+        sf: "var(--sf)",
+        sf2: "var(--sf2)",
+        bd: "var(--bd)",
+        tx: "var(--tx)",
+        mu: "var(--mu)",
+        ac: "var(--ac)",
+        ac2: "var(--ac2)",
+        on: "var(--on)",
+        ok: "var(--ok)",
+        er: "var(--er)",
+        glow: "var(--glow)",
+        background: "var(--bg)",
+        foreground: "var(--tx)",
       },
     },
   },

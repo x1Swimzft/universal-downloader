@@ -1,11 +1,13 @@
 from pydantic import BaseModel, HttpUrl
-from typing import Optional, List
+from typing import Optional, List, Union
 from enum import Enum
 
 
 class MediaFormat(str, Enum):
     mp3 = "mp3"
     mp4 = "mp4"
+    m4a = "m4a"
+    opus = "opus"
 
 
 DownloadFormat = MediaFormat
@@ -47,7 +49,7 @@ class FormatOption(BaseModel):
 class MediaInfo(BaseModel):
     title: str
     thumbnail: Optional[str] = None
-    duration: Optional[int] = None
+    duration: Optional[Union[int, float]] = None
     uploader: Optional[str] = None
     platform: Optional[str] = None
     formats: List[FormatOption] = []

@@ -19,8 +19,18 @@ from app.models.schemas import (
     JobStatus,
     DownloadFormat,
 )
-from app.services.extractor import extract_info, download_media, get_direct_stream_url
-from app.services.queue_manager import queue_mgr
+from app.services.extractor import (
+    extract_info,
+    download_media,
+    get_direct_stream_url,
+    validate_url_not_private,
+)
+from app.services.queue_manager import (
+    queue_mgr,
+    is_allowed_path,
+    safe_filename,
+    is_safe_save_dir,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -35,14 +45,24 @@ class QueueAddRequest(BaseModel):
     urls: Optional[list[str]] = None
     url: Optional[str] = None
     format: DownloadFormat = DownloadFormat.mp4
-    quality: str = "720"
+    quality: str = "1080"
+    title: Optional[str] = None
 
 
 class QuickFetchRequest(BaseModel):
     url: str
     format: DownloadFormat = DownloadFormat.mp4
     quality: str = "1080"
-    save_to_dir: Optional[str] = r"C:\Users\Dataria\Downloads\UniversalDownloader"
+    save_to_dir: Optional[str] = None
+
+
+class SettingsSyncRequest(BaseModel):
+    max_concurrent: Optional[int] = None
+    save_folder: Optional[str] = None
+
+
+class OpenFolderRequest(BaseModel):
+    path: Optional[str] = None
 
 
 def _strip_ansi(text: str) -> str:
@@ -50,9 +70,26 @@ def _strip_ansi(text: str) -> str:
     return ansi_escape.sub('', text)
 
 
+def _validate_save_dir(requested_dir: Optional[str]) -> str:
+    if not requested_dir:
+        return queue_mgr.save_dir
+    ok, err = is_safe_save_dir(requested_dir)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err)
+    real = os.path.realpath(requested_dir)
+    if not is_allowed_path(real, queue_mgr.save_dir):
+        raise HTTPException(
+            status_code=403,
+            detail="Path is outside the configured save folder in Settings.",
+        )
+    return real
+
+
 @router.post("/info", response_model=MediaInfo)
 async def get_info(body: InfoRequest):
     """Extract metadata (title, thumbnail, available formats) without downloading."""
+    if not validate_url_not_private(body.url):
+        raise HTTPException(status_code=400, detail="Invalid or private URL not allowed")
     try:
         info = await extract_info(body.url)
         return info
@@ -62,16 +99,15 @@ async def get_info(body: InfoRequest):
 
 
 def _safe_filename(title: str, ext: str) -> str:
-    """Sanitize title for OS-safe filename and preserve Unicode characters."""
-    safe = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-    if not safe:
-        safe = "download"
-    return f"{safe}.{ext}"
+    return safe_filename(title, ext)
 
 
 @router.post("/download", response_model=DownloadResponse)
 async def start_download(body: DownloadRequest, background_tasks: BackgroundTasks):
     """Queue a download job. Returns job_id for polling."""
+    if not validate_url_not_private(body.url):
+        raise HTTPException(status_code=400, detail="Invalid or private URL not allowed")
+    validated_dir = _validate_save_dir(body.save_to_dir) if body.save_to_dir else None
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         "status": "pending",
@@ -89,7 +125,7 @@ async def start_download(body: DownloadRequest, background_tasks: BackgroundTask
         body.format.value,
         body.quality,
         body.title,
-        body.save_to_dir,
+        validated_dir,
     )
     return DownloadResponse(job_id=job_id, status="pending")
 
@@ -127,6 +163,11 @@ async def download_file(job_id: str):
 
 @router.get("/stream")
 async def stream_media(url: str, quality: str = "720"):
+    if not validate_url_not_private(url):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or private URL not allowed"
+        )
     stream_info = await get_direct_stream_url(url, quality)
     if not stream_info:
         raise HTTPException(
@@ -134,16 +175,42 @@ async def stream_media(url: str, quality: str = "720"):
             detail="Direct stream unavailable for this resolution (requires FFmpeg merge)."
         )
 
+    direct_url = stream_info.get("url", "")
+    if not validate_url_not_private(direct_url):
+        raise HTTPException(
+            status_code=400,
+            detail="Direct stream target points to invalid or private address."
+        )
+
     safe_title = _safe_filename(stream_info["title"], "mp4")
     encoded_filename = quote(safe_title)
+
+    async def check_redirect(response: httpx.Response):
+        if response.is_redirect:
+            location = response.headers.get("location")
+            if location:
+                redirect_url = str(response.url.join(location))
+                if not validate_url_not_private(redirect_url):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Redirect to private or loopback IP forbidden"
+                    )
 
     client = httpx.AsyncClient(
         headers=stream_info.get("http_headers", {}),
         timeout=60.0,
         follow_redirects=True,
+        event_hooks={"response": [check_redirect]},
     )
-    req = client.build_request("GET", stream_info["url"])
-    resp = await client.send(req, stream=True)
+    try:
+        req = client.build_request("GET", direct_url)
+        resp = await client.send(req, stream=True)
+    except HTTPException:
+        await client.aclose()
+        raise
+    except Exception as e:
+        await client.aclose()
+        raise HTTPException(status_code=400, detail=str(e))
 
     headers = {
         "Content-Disposition": f"attachment; filename=\"{safe_title}\"; filename*=utf-8''{encoded_filename}"
@@ -182,10 +249,23 @@ async def add_to_queue(body: QueueAddRequest):
     for raw_url in urls:
         clean = raw_url.strip()
         if clean:
-            jid = queue_mgr.add(clean, fmt=fmt, quality=body.quality)
+            if not validate_url_not_private(clean):
+                raise HTTPException(status_code=400, detail=f"Invalid or private URL not allowed: {clean}")
+            title = body.title if len(urls) == 1 else None
+            jid = queue_mgr.add(clean, fmt=fmt, quality=body.quality, title=title)
             job_ids.append(jid)
 
     return {"job_ids": job_ids, "count": len(job_ids)}
+
+
+@router.delete("/queue/{job_id}")
+async def delete_queue_item(job_id: str):
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job_id")
+    existed = await queue_mgr.cancel(job_id)
+    return {"cancelled": existed, "job_id": job_id}
 
 
 @router.get("/queue/stream")
@@ -197,10 +277,58 @@ async def get_queue_stream():
     )
 
 
+@router.get("/settings")
+async def get_backend_settings():
+    return {
+        "max_concurrent": queue_mgr.max_concurrent,
+        "save_folder": queue_mgr.save_dir,
+    }
+
+
+@router.post("/settings")
+async def update_backend_settings(body: SettingsSyncRequest):
+    if body.max_concurrent is not None:
+        if body.max_concurrent not in (1, 2, 3, 5):
+            raise HTTPException(status_code=400, detail="max_concurrent must be 1, 2, 3, or 5")
+        queue_mgr.set_max_concurrent(body.max_concurrent)
+    if body.save_folder:
+        ok, err = is_safe_save_dir(body.save_folder)
+        if not ok:
+            raise HTTPException(status_code=400, detail=err)
+        queue_mgr.set_save_dir(body.save_folder)
+    return {
+        "max_concurrent": queue_mgr.max_concurrent,
+        "save_folder": queue_mgr.save_dir,
+    }
+
+
+@router.post("/open-folder")
+async def open_folder(body: OpenFolderRequest):
+    target = body.path or queue_mgr.save_dir
+    real_target = os.path.realpath(target)
+    if not is_allowed_path(real_target, queue_mgr.save_dir):
+        raise HTTPException(
+            status_code=403,
+            detail="Path is outside the configured save folder in Settings.",
+        )
+    if not os.path.isdir(real_target):
+        raise HTTPException(
+            status_code=400,
+            detail="Target path is not a directory.",
+        )
+
+    os.makedirs(real_target, exist_ok=True)
+    if hasattr(os, "startfile"):
+        os.startfile(real_target)
+    return {"opened": real_target}
+
+
 @router.post("/rio/quick-fetch")
 async def rio_quick_fetch(body: QuickFetchRequest):
     """Fast headless download for RIO workflow saving directly to local folder."""
-    save_dir = body.save_to_dir or r"C:\Users\Dataria\Downloads\UniversalDownloader"
+    if not validate_url_not_private(body.url):
+        raise HTTPException(status_code=400, detail="Invalid or private URL not allowed")
+    save_dir = _validate_save_dir(body.save_to_dir)
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(TMP_DIR, exist_ok=True)
 
@@ -229,6 +357,10 @@ async def rio_quick_fetch(body: QuickFetchRequest):
             "quality": body.quality,
             "local_path": dest_path,
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -248,14 +380,15 @@ async def _run_download(
         filepath, extracted_title = await download_media(url, fmt, quality, TMP_DIR, _jobs, job_id)
         final_title = title or extracted_title or "download"
 
-        if save_to_dir:
-            os.makedirs(save_to_dir, exist_ok=True)
+        target_dir = save_to_dir or queue_mgr.save_dir
+        if target_dir and is_allowed_path(target_dir, queue_mgr.save_dir):
+            os.makedirs(target_dir, exist_ok=True)
             safe_name = _safe_filename(final_title, fmt)
-            dest_path = os.path.join(save_to_dir, safe_name)
+            dest_path = os.path.join(target_dir, safe_name)
             base_name, ext = os.path.splitext(safe_name)
             counter = 1
             while os.path.exists(dest_path):
-                dest_path = os.path.join(save_to_dir, f"{base_name} ({counter}){ext}")
+                dest_path = os.path.join(target_dir, f"{base_name} ({counter}){ext}")
                 counter += 1
             shutil.move(filepath, dest_path)
             filepath = dest_path

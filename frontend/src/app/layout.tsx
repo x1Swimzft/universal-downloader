@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Universal Downloader",
-  description: "Download MP3 & MP4 from YouTube, TikTok, Instagram and more",
+  description: "One place for every video and audio link - fast, private, and on your own PC.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.png",
+  },
 };
 
 export default function RootLayout({
@@ -15,8 +16,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
+      <body>{children}</body>
     </html>
   );
 }

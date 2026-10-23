@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Universal Downloader — Redesign</title>
+<style>
+:root{--bg:#f5f6fb;--sf:#fff;--sf2:#eef0f8;--bd:#dfe3f0;--tx:#151a2d;--mu:#5d6684;--ac:#7c3aed;--ac2:#6d28d9;--on:#fff;--ok:#059669;--er:#dc2626;--glow:rgba(124,58,237,.14);
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#060912;--sf:#0e1322;--sf2:#151b30;--bd:#232b47;--tx:#e9edf9;--mu:#8e98b8;--ac:#8b5cf6;--ac2:#a78bfa;--ok:#34d399;--er:#f87171;--glow:rgba(139,92,246,.2)}}
+:root[data-theme="dark"]{--bg:#060912;--sf:#0e1322;--sf2:#151b30;--bd:#232b47;--tx:#e9edf9;--mu:#8e98b8;--ac:#8b5cf6;--ac2:#a78bfa;--ok:#34d399;--er:#f87171;--glow:rgba(139,92,246,.2)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 Inter,"Segoe UI",system-ui,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--ac2);outline-offset:2px}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.app{display:flex;min-height:100vh}
+.side{width:224px;flex:none;background:var(--sf);border-right:1px solid var(--bd);padding:18px 12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;font-weight:700;line-height:1.1}
+.brand span.l{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--ac),#ec4899);color:#fff;display:grid;place-items:center}
+.brand em{font-style:normal;color:var(--ac2);display:block}
+.nav{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:10px;background:none;color:var(--mu);text-align:left;min-height:44px}
+.nav:hover{background:var(--sf2);color:var(--tx)}
+.nav[aria-current=page]{background:var(--glow);color:var(--ac2);font-weight:600}
+.nav b{margin-left:auto;background:var(--ac);color:#fff;border-radius:99px;font-size:12px;padding:0 8px;min-width:22px;text-align:center}
+.sp{flex:1}
+.ver{font-size:12px;color:var(--mu);padding:8px 12px}
+main{flex:1;min-width:0;padding:40px clamp(16px,4vw,56px)}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:clamp(26px,4vw,36px);line-height:1.15;margin:0 0 6px;letter-spacing:-.02em}
+h1 span{background:linear-gradient(90deg,var(--ac2),#ec4899);-webkit-background-clip:text;background-clip:text;color:transparent}
+h2{font-size:20px;margin:0 0 16px}
+.sub{color:var(--mu);margin:0 0 24px}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:18px;box-shadow:0 10px 30px -18px var(--glow)}
+.bar{display:flex;gap:8px;flex-wrap:wrap}
+.bar .in{flex:1;min-width:200px;display:flex;align-items:center;gap:8px;background:var(--sf2);border:1px solid var(--bd);border-radius:12px;padding:0 12px}
+.bar .in:focus-within{border-color:var(--ac)}
+.bar input{flex:1;border:0;background:none;height:48px;outline:0;min-width:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 20px;border-radius:12px;border:1px solid var(--bd);background:var(--sf2);font-weight:600;transition:transform .15s,background .15s}
+.btn:hover{background:var(--bd)}.btn:active{transform:scale(.97)}
+.btn.p{background:var(--ac);border-color:var(--ac);color:var(--on)}.btn.p:hover{background:var(--ac2)}
+.btn.sm{height:36px;padding:0 12px;font-size:13px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:99px;border:1px solid var(--bd);background:none;font-size:13px;color:var(--mu);min-height:32px}
+.chip.on{border-color:var(--ac);color:var(--ac2);background:var(--glow);font-weight:600}
+.err{color:var(--er);font-size:13px;margin-top:10px;min-height:18px}
+.res{margin-top:18px;display:none;gap:16px;flex-wrap:wrap}
+.res.show{display:flex}
+.thumb{width:200px;aspect-ratio:16/9;border-radius:12px;background:linear-gradient(135deg,#312e81,#be185d);display:grid;place-items:center;color:#fff;flex:none}
+.info{flex:1;min-width:240px}
+.info h3{margin:0 0 2px;font-size:16px}
+.meta{color:var(--mu);font-size:13px;margin-bottom:12px}
+.seg{display:inline-flex;background:var(--sf2);border-radius:10px;padding:3px;margin-bottom:10px}
+.seg button{border:0;background:none;padding:6px 16px;border-radius:8px;color:var(--mu);min-height:34px}
+.seg button.on{background:var(--sf);color:var(--tx);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.foot{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap;color:var(--mu);font-size:13px}
+.foot .btn{margin-left:auto}
+.hint{display:flex;align-items:center;gap:8px;color:var(--mu);font-size:13px;margin-top:18px;justify-content:center}
+.dl{padding:14px;margin-bottom:10px}
+.dl .t{display:flex;justify-content:space-between;gap:8px;font-weight:600;font-size:14px}
+.dl .s{display:flex;justify-content:space-between;color:var(--mu);font-size:12px;margin-top:6px}
+.pg{height:8px;border-radius:99px;background:var(--sf2);margin-top:10px;overflow:hidden}
+.pg i{display:block;height:100%;background:linear-gradient(90deg,var(--ac),#ec4899);border-radius:99px;transition:width .4s linear}
+.done .pg i{background:var(--ok)}
+.empty{text-align:center;color:var(--mu);padding:48px 16px;border:1px dashed var(--bd);border-radius:16px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--bd)}
+.row:last-child{border:0}
+.row small{display:block;color:var(--mu)}
+.sw{position:relative;width:44px;height:26px;flex:none}
+.sw input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.sw span{position:absolute;inset:0;background:var(--bd);border-radius:99px;transition:background .2s;pointer-events:none}
+.sw span:after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .2s}
+.sw input:checked+span{background:var(--ac)}.sw input:checked+span:after{transform:translateX(18px)}
+.sw input:focus-visible+span{outline:2px solid var(--ac2);outline-offset:2px}
+select{background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;min-height:40px}
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:16px}
+.plan{border:1px solid var(--bd);border-radius:14px;padding:16px}
+.plan.pro{border-color:var(--ac);background:var(--glow)}
+.plan ul{margin:8px 0 0;padding-left:18px;color:var(--mu);font-size:14px}
+.ok{color:var(--ok);font-size:13px;margin-top:10px}
+.v{display:none}.v.show{display:block}
+@media (max-width:720px){.app{flex-direction:column}.side{width:auto;height:auto;position:static;flex-direction:row;overflow-x:auto;border:0;border-bottom:1px solid var(--bd);padding:8px}.brand,.sp,.ver{display:none}.nav{width:auto;white-space:nowrap}main{padding:24px 16px}.thumb{width:100%}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="dl" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></symbol>
+<symbol id="q" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+<symbol id="h" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="s" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+<symbol id="k" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-3 3 3 3m-6-1 2 2"/></symbol>
+<symbol id="c" viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9z"/></symbol>
+<symbol id="m" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+<symbol id="p" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+<symbol id="x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="f" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+</defs></svg>
+<div class="app">
+<aside class="side">
+ <div class="brand"><span class="l"><svg class="i"><use href="#dl"/></svg></span><div>Universal<em>Downloader</em></div></div>
+ <button class="nav" data-v="dl" aria-current="page"><svg class="i"><use href="#dl"/></svg>Download</button>
+ <button class="nav" data-v="q"><svg class="i"><use href="#q"/></svg>Queue<b id="qb" hidden>0</b></button>
+ <button class="nav" data-v="h"><svg class="i"><use href="#h"/></svg>History</button>
+ <button class="nav" data-v="s"><svg class="i"><use href="#s"/></svg>Settings</button>
+ <button class="nav" data-v="l"><svg class="i"><use href="#k"/></svg>License</button>
+ <div class="sp"></div>
+ <button class="nav" id="th"><svg class="i"><use href="#m"/></svg>Theme</button>
+ <div class="ver" id="ver">v0.1.0 · Free</div>
+</aside>
+<main><div class="wrap">
+
+<section class="v show" id="v-dl">
+ <h1>Paste a link. <span>Get the file.</span></h1>
+ <p class="sub">One place for every video and audio link — fast, private, and on your own PC.</p>
+ <div class="card">
+  <div class="bar">
+   <label class="in"><svg class="i"><use href="#dl"/></svg><span hidden>Video or audio URL</span><input id="url" placeholder="Paste a video or audio link…" autocomplete="off"></label>
+   <button class="btn" id="paste" aria-label="Paste from clipboard"><svg class="i"><use href="#c"/></svg>Paste</button>
+   <button class="btn p" id="fetch">Fetch</button>
+  </div>
+  <div class="chips" id="plats" aria-label="Supported sites"></div>
+  <div class="err" id="err" role="alert"></div>
+  <div class="res" id="res">
+   <div class="thumb"><svg class="i" style="width:36px;height:36px;fill:#fff"><use href="#p"/></svg></div>
+   <div class="info">
+    <h3 id="rt"></h3><div class="meta" id="rm"></div>
+    <div class="seg" role="tablist"><button class="on" data-m="Video">Video</button><button data-m="Audio">Audio</button></div>
+    <div class="chips" id="qs" style="margin-top:0"></div>
+   </div>
+   <div class="foot" style="width:100%"><svg class="i"><use href="#f"/></svg><span>Save to Downloads\Universal Downloader</span><button class="btn p" id="go"><svg class="i"><use href="#dl"/></svg>Download</button></div>
+  </div>
+ </div>
+ <div class="hint"><svg class="i"><use href="#c"/></svg>Tip: copy a link and it’s detected automatically.</div>
+</section>
+
+<section class="v" id="v-q"><h2>Queue</h2><div id="ql"></div></section>
+<section class="v" id="v-h"><h2>History</h2><div id="hl"></div></section>
+
+<section class="v" id="v-s"><h2>Settings</h2><div class="card">
+ <div class="row"><div>Auto-detect copied links<small>Watch the clipboard and offer to fetch</small></div><label class="sw"><input type="checkbox" checked aria-label="Auto-detect copied links"><span></span></label></div>
+ <div class="row"><div>Minimize to tray on close<small>Keep downloads running in the background</small></div><label class="sw"><input type="checkbox" checked aria-label="Minimize to tray"><span></span></label></div>
+ <div class="row"><div>Notify when finished<small>Windows notification for each completed file</small></div><label class="sw"><input type="checkbox" checked aria-label="Notify when finished"><span></span></label></div>
+ <div class="row"><div>Simultaneous downloads</div><select aria-label="Simultaneous downloads"><option>1</option><option>2</option><option selected>3</option><option>5</option></select></div>
+ <div class="row"><div>Save folder<small>Downloads\Universal Downloader</small></div><button class="btn sm">Change</button></div>
+</div></section>
+
+<section class="v" id="v-l"><h2>License</h2><div class="card">
+ <p class="sub" style="margin-bottom:12px">Enter your license key to unlock Pro.</p>
+ <div class="bar"><label class="in"><svg class="i"><use href="#k"/></svg><span hidden>License key</span><input id="key" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="19" autocomplete="off"></label><button class="btn p" id="act">Activate</button></div>
+ <div class="err" id="kerr" role="alert"></div><div class="ok" id="kok" hidden>Pro activated on this device.</div>
+ <div class="plans">
+  <div class="plan"><b>Free</b><ul><li>Single and batch downloads</li><li>Up to 1080p</li><li>3 at a time</li></ul></div>
+  <div class="plan pro"><b>Pro</b><ul><li>Playlists and channels</li><li>4K and subtitles</li><li>Scheduler and auto-updates</li></ul></div>
+ </div>
+</div></section>
+
+</div></main></div>
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const P=[["YouTube",/youtu/],["TikTok",/tiktok/],["Instagram",/instagram/],["X",/twitter|x\.com/],["Facebook",/facebook|fb\./],["SoundCloud",/soundcloud/]];
+const Q={Video:["2160p","1080p","720p","480p"],Audio:["MP3 320k","M4A","OPUS"]};
+let mode="Video",ql="1080p",plat="",items=[],hist=[];
+const det=u=>(P.find(p=>p[1].test(u))||[])[0]||"";
+function plats(){$("#plats").innerHTML=P.map(p=>`<span class="chip ${p[0]===plat?"on":""}">${p[0]}</span>`).join("")}
+function qs(){$("#qs").innerHTML=Q[mode].map(x=>`<button class="chip ${x===ql?"on":""}" data-q="${x}">${x}</button>`).join("")}
+function view(v){$$(".v").forEach(e=>e.classList.toggle("show",e.id==="v-"+v));$$(".nav[data-v]").forEach(b=>b.dataset.v===v?b.setAttribute("aria-current","page"):b.removeAttribute("aria-current"))}
+function fetchUrl(){const u=$("#url").value.trim();$("#res").classList.remove("show");
+ if(!/^https?:\/\/\S+\.\S+/.test(u)){$("#err").textContent="That doesn’t look like a link. Paste a full URL starting with https://";return}
+ $("#err").textContent="";plat=det(u);plats();$("#fetch").textContent="Fetching…";
+ setTimeout(()=>{$("#fetch").textContent="Fetch";$("#rt").textContent="Sample video from "+(plat||"the web");$("#rm").textContent="3:42 · 1920×1080 · about 84 MB";mode="Video";ql="1080p";qs();$$(".seg button").forEach(b=>b.classList.toggle("on",b.dataset.m==="Video"));$("#res").classList.add("show")},700)}
+function draw(){const run=items.filter(i=>i.p<100).length,b=$("#qb");b.hidden=!run;b.textContent=run;
+ $("#ql").innerHTML=items.length?items.map(i=>`<div class="card dl ${i.p>=100?"done":""}"><div class="t"><span>${i.t}</span><button class="chip" data-x="${i.id}" aria-label="Remove">${i.p>=100?"Done":"Cancel"}</button></div><div class="pg"><i style="width:${i.p}%"></i></div><div class="s"><span>${i.q} · ${i.pl||"Web"}</span><span>${i.p>=100?"Saved":Math.round(i.p)+"% · "+i.sp+" MB/s"}</span></div></div>`).join(""):`<div class="empty">Nothing downloading. Paste a link to start.</div>`;
+ $("#hl").innerHTML=hist.length?hist.map(i=>`<div class="card dl"><div class="t"><span>${i.t}</span><span class="meta" style="margin:0">${i.q}</span></div></div>`).join(""):`<div class="empty">Finished downloads will show up here.</div>`}
+setInterval(()=>{let ch=0;items.forEach(i=>{if(i.p<100){i.p=Math.min(100,i.p+2+Math.random()*5);i.sp=(3+Math.random()*9).toFixed(1);ch=1;if(i.p>=100)hist.unshift(i)}});if(ch)draw()},400);
+$$(".nav[data-v]").forEach(b=>b.onclick=()=>view(b.dataset.v));
+$("#fetch").onclick=fetchUrl;$("#url").onkeydown=e=>e.key==="Enter"&&fetchUrl();
+$("#paste").onclick=async()=>{try{$("#url").value=await navigator.clipboard.readText();fetchUrl()}catch(e){$("#err").textContent="Clipboard access was blocked. Paste with Ctrl+V instead."}};
+$(".seg").onclick=e=>{const m=e.target.dataset.m;if(!m)return;mode=m;ql=Q[m][m==="Video"?1:0];$$(".seg button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));qs()};
+$("#qs").onclick=e=>{if(e.target.dataset.q){ql=e.target.dataset.q;qs()}};
+$("#go").onclick=()=>{items.unshift({id:Date.now(),t:$("#rt").textContent,q:ql,pl:plat,p:0,sp:"0"});draw();view("q")};
+$("#ql").onclick=e=>{const id=e.target.dataset.x;if(id){items=items.filter(i=>i.id!=id);draw()}};
+$("#th").onclick=()=>{const r=document.documentElement,d=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;r.dataset.theme=d?"light":"dark"};
+$("#key").oninput=e=>{let v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,16);e.target.value=v.replace(/(.{4})(?=.)/g,"$1-")};
+$("#act").onclick=()=>{const ok=/^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/.test($("#key").value);$("#kerr").textContent=ok?"":"That key isn’t the right length. Check it and try again.";$("#kok").hidden=!ok;if(ok)$("#ver").textContent="v0.1.0 · Pro"};
+plats();qs();draw();
+</script>
+</body>
+</html>
