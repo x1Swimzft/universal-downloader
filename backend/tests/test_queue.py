@@ -446,6 +446,26 @@ class TestQueueAudioDestinations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["thumbnail"], "https://example.com/cover.jpg")
 
 
+    async def test_thumbnail_only_does_not_tag_video_jobs(self):
+        item = self.add_audio_item(
+            format="mp4",
+            title="Video",
+            artist=None,
+            album=None,
+            search_query=None,
+            playlist_title=None,
+            thumbnail="https://example.com/thumb.jpg",
+        )
+
+        with unittest.mock.patch.object(
+            queue_module, "download_media", side_effect=self.fake_download(item.id)
+        ):
+            await self.queue._worker(item.id)
+
+        self.assertIsNone(self.calls[0]["music_metadata"])
+        self.assertIsNone(self.calls[0]["search_query"])
+
+
 class TestQueueApi(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.test_token = "queue-session-token-12345"

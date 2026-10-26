@@ -352,12 +352,8 @@ class QueueManager:
                         try:
                             os.makedirs(TMP_DIR, exist_ok=True)
                             music_metadata = None
-                            if (
-                                item.artist
-                                or item.album
-                                or item.thumbnail
-                                or item.search_query
-                            ):
+                            # A playlist thumbnail alone must not trigger music tagging.
+                            if item.search_query or item.artist or item.album:
                                 music_metadata = {
                                     "title": item.title,
                                     "artist": item.artist,

@@ -492,7 +492,7 @@ def _extract_platform(url: str) -> str:
         "youtube": r"(youtube\.com|youtu\.be)",
         "tiktok": r"tiktok\.com",
         "instagram": r"instagram\.com",
-        "twitter": r"(twitter\.com|x\.com)",
+        "twitter": r"(twitter\.com|\bx\.com)",
         "facebook": r"(facebook\.com|fb\.watch)",
         "soundcloud": r"soundcloud\.com",
         "bilibili": r"bilibili\.com",

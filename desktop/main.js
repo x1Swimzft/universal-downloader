@@ -33,7 +33,7 @@ const AUDIO_FILENAME_TEMPLATES = [
   "{title}",
 ];
 const MEDIA_URL_RE =
-  /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com)\/.+/i;
+  /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com|open\.spotify\.com|music\.apple\.com|twitch\.tv|clips\.twitch\.tv|kick\.com|bilibili\.com|b23\.tv|reddit\.com|redd\.it|pinterest\.com|pin\.it|vimeo\.com|bandcamp\.com)\/.+/i;
 
 let autoUpdater = null;
 try {
@@ -279,10 +279,11 @@ function quickFetchFromClipboard() {
     return;
   }
   showNotification("Quick fetch started", url);
+  const isMusic = /(open\.spotify\.com|music\.apple\.com)/i.test(url);
   postBackendJson("/api/rio/quick-fetch", {
     url,
-    format: "mp4",
-    quality: "1080",
+    format: isMusic ? "mp3" : "mp4",
+    quality: isMusic ? "320" : "1080",
     save_to_dir: settings.saveFolder,
   })
     .then(({ status, body }) => {
@@ -494,12 +495,10 @@ async function startServices() {
 }
 
 function startClipboardWatcher() {
-  const supportedRegex =
-    /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com)\/.+/i;
   setInterval(() => {
     if (!settings || !settings.autoDetectClipboard || !mainWindow) return;
     const text = (clipboard.readText() || "").trim();
-    if (text && text !== lastClipboardText && supportedRegex.test(text)) {
+    if (text && text !== lastClipboardText && MEDIA_URL_RE.test(text)) {
       lastClipboardText = text;
       mainWindow.webContents
         .executeJavaScript(

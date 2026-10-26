@@ -616,7 +616,7 @@ async def _run_download(
             if is_audio:
                 safe_name = format_audio_filename(
                     queue_mgr.audio_filename_template,
-                    {"title": extracted_title},
+                    {"title": final_title},
                     output_ext,
                 )
             else:

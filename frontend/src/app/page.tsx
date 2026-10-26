@@ -50,7 +50,7 @@ const PLATFORM_PATTERNS: Array<[string, RegExp]> = [
   ["Apple Music", /music\.apple\.com|apple music/i],
   ["TikTok", /tiktok/i],
   ["Instagram", /instagram/i],
-  ["X", /twitter|x\.com/i],
+  ["X", /twitter\.com|\bx\.com/i],
   ["Facebook", /facebook|fb\./i],
   ["Twitch", /twitch/i],
   ["Kick", /kick\.com/i],
@@ -412,6 +412,8 @@ export default function Home() {
       const isBatch = info.platform === "Multiple";
       for (let position = 0; position < entries.length; position += 1) {
         const entry = entries[position];
+        const entryIsMusic =
+          Boolean(entry.search_query) || isMusicPlatform(entry.platform);
         const playlistIndex = allEntries.findIndex(
           (candidate) => candidate.url === entry.url
         );
@@ -422,11 +424,15 @@ export default function Home() {
         await enqueueDownload(entry.url, format, quality, entry.title, {
           ...choices,
           socialBypass: settings.socialBypass,
-          artist: entry.artist,
-          album: entry.album,
           trackNumber,
-          searchQuery: entry.search_query,
-          thumbnail: entry.thumbnail,
+          ...(entryIsMusic
+            ? {
+                artist: entry.artist,
+                album: entry.album,
+                searchQuery: entry.search_query,
+                thumbnail: entry.thumbnail,
+              }
+            : {}),
           ...(isBatch
             ? {}
             : {
