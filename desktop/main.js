@@ -19,6 +19,11 @@ const http = require("http");
 const fs = require("fs");
 
 const appSessionToken = crypto.randomBytes(32).toString("hex");
+const APP_USER_MODEL_ID = "com.universaldownloader.app";
+app.setName("Universal Downloader");
+if (process.platform === "win32") {
+  app.setAppUserModelId(app.isPackaged ? APP_USER_MODEL_ID : "Universal Downloader");
+}
 const QUICK_FETCH_ACCELERATOR = "CommandOrControl+Shift+D";
 const COOKIE_BROWSERS = ["none", "chrome", "edge", "brave", "firefox"];
 const MEDIA_URL_RE =
@@ -203,7 +208,11 @@ function isWithinAllowedFolder(targetPath, allowedRoot) {
 
 function showNotification(title, body) {
   if (Notification.isSupported()) {
-    new Notification({ title: String(title), body: String(body || "") }).show();
+    new Notification({
+      title: String(title),
+      body: String(body || ""),
+      icon: APP_ICON_PATH,
+    }).show();
   }
 }
 
@@ -638,6 +647,7 @@ function registerIpcHandlers() {
       new Notification({
         title: String(payload.title),
         body: payload.body ? String(payload.body) : "",
+        icon: APP_ICON_PATH,
       }).show();
       return true;
     }
@@ -646,9 +656,6 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
-  if (process.platform === "win32") {
-    app.setAppUserModelId("com.universaldownloader.app");
-  }
   loadSettings();
   registerIpcHandlers();
   const { backendPort, frontendPort } = await startServices();
