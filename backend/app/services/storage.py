@@ -14,6 +14,9 @@ async def cleanup_old_files(tmp_dir: str, max_age_minutes: int = 15):
             fpath = os.path.join(tmp_dir, fname)
             if not os.path.isfile(fpath):
                 continue
+            # Paused downloads keep .part files so --continue can resume them.
+            if fname.endswith(".part"):
+                continue
             mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
             if now - mtime > timedelta(minutes=max_age_minutes):
                 os.remove(fpath)

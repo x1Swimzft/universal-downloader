@@ -20,6 +20,23 @@ from app.services.extractor import (
     diagnostic_message,
 )
 from app.services.queue_manager import QueueItem, QueueManager, queue_mgr
+from app.services.storage import cleanup_old_files
+
+
+class TestTempCleanup(unittest.IsolatedAsyncioTestCase):
+    async def test_cleanup_keeps_part_files_for_resume(self):
+        with tempfile.TemporaryDirectory(prefix="ud_cleanup_") as tmp_dir:
+            part_path = os.path.join(tmp_dir, "job.mp4.part")
+            stale_path = os.path.join(tmp_dir, "other.mp4")
+            for path in (part_path, stale_path):
+                with open(path, "wb") as f:
+                    f.write(b"x")
+                os.utime(path, (0, 0))
+
+            await cleanup_old_files(tmp_dir, max_age_minutes=15)
+
+            self.assertTrue(os.path.exists(part_path))
+            self.assertFalse(os.path.exists(stale_path))
 
 
 class TestErrorDiagnostics(unittest.TestCase):
