@@ -7,7 +7,7 @@ if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
 from app.models.schemas import MediaInfo
-from app.services.extractor import _clean_url
+from app.services.extractor import _clean_url, _friendly_error
 
 
 class TestExtractor(unittest.TestCase):
@@ -33,6 +33,17 @@ class TestExtractor(unittest.TestCase):
         yt_url = "https://youtu.be/dQw4w9WgXcQ?si=abc"
         cleaned = _clean_url(yt_url)
         self.assertEqual(cleaned, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+    def test_instagram_url_clean(self):
+        cleaned = _clean_url("https://www.instagram.com/p/ABC123/?img_index=1&igsh=xyz")
+        self.assertEqual(cleaned, "https://www.instagram.com/p/ABC123/")
+
+    def test_friendly_error(self):
+        ig = "https://www.instagram.com/p/ABC123/"
+        self.assertIn("only contains photos", _friendly_error("ERROR: No video formats found!", ig))
+        tt = "https://www.tiktok.com/@a/video/1"
+        self.assertIn("HTTP 403", _friendly_error("Unable to download webpage: HTTP Error 403: Forbidden", tt))
+        self.assertIsNone(_friendly_error("some other error", tt))
 
 
 if __name__ == "__main__":

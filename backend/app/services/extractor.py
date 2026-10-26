@@ -91,10 +91,22 @@ def _clean_url(url: str) -> str:
         if "tiktok.com" in netloc and "/photo/" in parsed.path:
             clean_path = parsed.path.replace("/photo/", "/video/")
             return urlunparse(parsed._replace(path=clean_path))
+        # Instagram: drop img_index / igsh / utm_* so the whole post is inspected
+        if "instagram.com" in netloc:
+            return urlunparse(parsed._replace(query="", fragment=""))
     except Exception:
         pass
 
     return url
+
+
+def _friendly_error(msg: str, url: str) -> Optional[str]:
+    """Map known raw yt-dlp failures to a message an end user can act on."""
+    if "instagram.com" in url and "No video formats found" in msg:
+        return "This Instagram post only contains photos (no video found), or requires logging in."
+    if "tiktok.com" in url and "HTTP Error 403" in msg:
+        return "TikTok blocked this request (HTTP 403). Your network or region may be blocked - try another network or VPN."
+    return None
 
 
 def _extract_platform(url: str) -> str:
@@ -143,7 +155,13 @@ async def extract_info(url: str) -> MediaInfo:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(clean_url, download=False)
 
-    info = await loop.run_in_executor(None, _extract)
+    try:
+        info = await loop.run_in_executor(None, _extract)
+    except Exception as e:
+        friendly = _friendly_error(str(e), clean_url)
+        if friendly:
+            raise ValueError(friendly) from e
+        raise
 
     formats: list[FormatOption] = []
     seen_resolutions: set[str] = set()
@@ -295,7 +313,13 @@ async def download_media(
             info_dict = ydl.extract_info(clean_url, download=True)
             return info_dict.get("title", "download") if info_dict else "download"
 
-    extracted_title = await loop.run_in_executor(None, _download)
+    try:
+        extracted_title = await loop.run_in_executor(None, _download)
+    except Exception as e:
+        friendly = _friendly_error(str(e), clean_url)
+        if friendly:
+            raise ValueError(friendly) from e
+        raise
 
     if cancel_event and cancel_event.is_set():
         raise yt_dlp.utils.DownloadError("Cancelled by user")
