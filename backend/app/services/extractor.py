@@ -5,12 +5,13 @@ import re
 import socket
 import ipaddress
 import json
+import html as html_lib
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin, quote
 from typing import Dict, Any, Optional, List
 import httpx
 
@@ -44,6 +45,14 @@ PRESET_CHOICES = ("edit_ready", "audio_norm", "audio_lossless", "social_bypass")
 MAX_COOKIE_FILE_BYTES = 5 * 1024 * 1024
 MAX_IMAGES = 30
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_COVER_BYTES = 10 * 1024 * 1024
+MUSIC_TIMEOUT = 15.0
+AUDIO_FILENAME_TEMPLATES = (
+    "{track} - {artist} - {title}",
+    "{artist} - {title}",
+    "{title} ({artist})",
+    "{title}",
+)
 TIKTOK_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
@@ -236,6 +245,61 @@ def _preset_ffmpeg_args(preset: str, src: str, dst: str) -> List[str]:
     return ["-y", "-i", src, *opts, dst]
 
 
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def sanitize_name(text: str) -> str:
+    """Strip characters Windows rejects and trim trailing dots/spaces."""
+    cleaned = _ILLEGAL_FILENAME_CHARS.sub("", str(text or "")).strip()
+    return cleaned.strip(" .")
+
+
+def format_audio_filename(
+    template: str,
+    metadata: Dict[str, Any],
+    ext: str,
+    playlist: bool = False,
+) -> str:
+    """Render one of the supported audio filename presets."""
+    metadata = metadata or {}
+    chosen = (
+        template.strip()
+        if isinstance(template, str) and template.strip()
+        else AUDIO_FILENAME_TEMPLATES[1]
+    )
+    title = str(metadata.get("title") or "").strip()
+    artist = str(metadata.get("artist") or "").strip()
+    album = str(metadata.get("album") or "").strip()
+    raw_track = metadata.get("track_number")
+    track = None
+    if isinstance(raw_track, int) and not isinstance(raw_track, bool) and raw_track > 0:
+        track = raw_track
+    elif str(raw_track or "").strip().isdigit():
+        track = int(str(raw_track).strip())
+
+    name = chosen
+    for token, value in (
+        ("{track}", f"{track:02d}" if track else ""),
+        ("{artist}", artist),
+        ("{title}", title),
+        ("{album}", album),
+    ):
+        name = name.replace(token, value)
+    name = re.sub(r"\{[^{}]*\}", "", name)
+    name = re.sub(r"\s*\(\s*\)", "", name)
+    name = re.sub(r"\s*-\s*-\s*", " - ", name)
+    name = re.sub(r"^(?:\s*-\s*)+|(?:\s*-\s*)+$", "", name)
+    name = sanitize_name(name) or sanitize_name(title) or "Untitled"
+
+    if playlist and track and "{track}" not in chosen:
+        name = f"{track:02d} - {name}"
+
+    extension = str(ext or "").strip()
+    if extension and not extension.startswith("."):
+        extension = "." + extension
+    return name + extension
+
+
 def _ffmpeg_executable() -> str:
     found = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg")
     if not found:
@@ -398,6 +462,30 @@ def diagnostic_message(message: str, url: str = "") -> tuple[str, str]:
     return code, _ERROR_MESSAGES.get(code, _clean_error_text(message))
 
 
+_SPOTIFY_PATH_RE = re.compile(
+    r"^/(?:intl-[a-z-]+/)?(track|album|playlist)/([A-Za-z0-9]+)", re.IGNORECASE
+)
+
+
+def is_music_url(url: str) -> bool:
+    """True for Spotify track/album/playlist and Apple Music links."""
+    if not isinstance(url, str) or not url.strip():
+        return False
+    cleaned = url.strip()
+    if "://" not in cleaned:
+        cleaned = "https://" + cleaned
+    try:
+        parsed = urlparse(cleaned)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return False
+    if host == "open.spotify.com":
+        return bool(_SPOTIFY_PATH_RE.match(parsed.path))
+    if host == "music.apple.com":
+        return bool(parsed.path.strip("/"))
+    return False
+
+
 def _extract_platform(url: str) -> str:
     """Detect platform from URL."""
     patterns = {
@@ -410,6 +498,12 @@ def _extract_platform(url: str) -> str:
         "bilibili": r"bilibili\.com",
         "reddit": r"reddit\.com",
         "vimeo": r"vimeo\.com",
+        "spotify": r"spotify\.com",
+        "apple": r"music\.apple\.com",
+        "twitch": r"twitch\.tv",
+        "kick": r"kick\.com",
+        "pinterest": r"(pinterest\.[a-z.]+|pin\.it)",
+        "bandcamp": r"bandcamp\.com",
     }
     for name, pattern in patterns.items():
         if re.search(pattern, url, re.IGNORECASE):
@@ -586,6 +680,667 @@ async def _fetch_tiktok_photos(url: str) -> tuple[List[str], Optional[str]]:
     return [], None
 
 
+async def _get_text(url: str) -> Optional[str]:
+    """Fetch a public HTML/JSON page from a fixed music host."""
+    headers = {
+        "User-Agent": TIKTOK_UA,
+        "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+    }
+    try:
+        async with httpx.AsyncClient(
+            headers=headers, timeout=MUSIC_TIMEOUT, follow_redirects=False
+        ) as client:
+            response = await client.get(url)
+            if response.status_code >= 400:
+                return None
+            return response.text
+    except Exception:
+        return None
+
+
+def _parse_script_json(html_text: Optional[str], script_id: str) -> Any:
+    if not html_text:
+        return None
+    match = re.search(
+        r'<script[^>]*\bid=["\']' + re.escape(script_id) + r'["\'][^>]*>(.*?)</script>',
+        html_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _meta_content(html_text: str, prop: str) -> Optional[str]:
+    for tag in re.findall(r"<meta\b[^>]*>", html_text or "", flags=re.IGNORECASE):
+        if re.search(
+            r'(?:property|name)\s*=\s*["\']' + re.escape(prop) + r'["\']',
+            tag,
+            flags=re.IGNORECASE,
+        ):
+            match = re.search(
+                r'content\s*=\s*["\']([^"\']*)["\']',
+                tag,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if match:
+                content = html_lib.unescape(match.group(1)).strip()
+                if content:
+                    return content
+    return None
+
+
+def _safe_cover_url(value: Any) -> Optional[str]:
+    """Accept only http(s) cover URLs without literal private hosts."""
+    if not isinstance(value, str):
+        return None
+    url = value.strip()
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+            return None
+        try:
+            ip = ipaddress.ip_address(parsed.hostname)
+            if is_private_or_loopback_ip(str(ip)):
+                return None
+        except ValueError:
+            pass
+    except ValueError:
+        return None
+    return url
+
+
+def _music_duration(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value < 0:
+        return None
+    seconds = value / 1000 if value > 10000 else value
+    return round(seconds)
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value or "").strip()
+    return int(text) if text.isdigit() and int(text) > 0 else None
+
+
+def _search_query(artist: Optional[str], title: Optional[str]) -> str:
+    title_text = str(title or "").strip()
+    artist_text = str(artist or "").strip()
+    if artist_text and title_text:
+        return f"{artist_text} - {title_text} official audio"
+    if title_text:
+        return f"{title_text} official audio"
+    return ""
+
+
+def _music_entry(
+    url: str,
+    title: str,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    track_number: Optional[Any] = None,
+    duration: Optional[Any] = None,
+    thumbnail: Optional[str] = None,
+    platform: str = "spotify",
+) -> Dict[str, Any]:
+    clean_title = str(title or "").strip() or "Untitled"
+    clean_artist = str(artist).strip() if artist else None
+    clean_album = str(album).strip() if album else None
+    return {
+        "url": url,
+        "title": clean_title,
+        "artist": clean_artist,
+        "album": clean_album,
+        "track_number": _positive_int(track_number),
+        "duration": _music_duration(duration),
+        "thumbnail": _safe_cover_url(thumbnail),
+        "platform": platform,
+        "media_type": "audio",
+        "search_query": _search_query(clean_artist, clean_title),
+    }
+
+
+def _unique_music_url(url: str, source: str, index: int, seen: set) -> str:
+    if url not in seen:
+        seen.add(url)
+        return url
+    candidate = f"{source}#track-{index}"
+    if candidate in seen:
+        candidate = f"{source}#track-{index}-{len(seen) + 1}"
+    seen.add(candidate)
+    return candidate
+
+
+def _music_collection(
+    platform: str,
+    media_type: str,
+    title: Optional[str],
+    artist: Optional[str],
+    album: Optional[str],
+    thumbnail: Optional[str],
+    entries: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "platform": platform,
+        "title": str(title or "").strip() or "Music",
+        "artist": artist,
+        "album": album,
+        "thumbnail": _safe_cover_url(thumbnail),
+        "media_type": media_type,
+        "entries": entries,
+    }
+
+
+def _spotify_target(url: str) -> tuple[str, str]:
+    match = _SPOTIFY_PATH_RE.match(urlparse(url).path)
+    if not match:
+        raise ValueError("This is not a supported Spotify link.")
+    return match.group(1).lower(), match.group(2)
+
+
+def _spotify_artists(value: Any) -> List[str]:
+    if isinstance(value, dict):
+        value = [value]
+    elif isinstance(value, str):
+        value = [value]
+    names: List[str] = []
+    if isinstance(value, list):
+        for item in value:
+            name = item.get("name") if isinstance(item, dict) else item
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+    return names
+
+
+def _spotify_cover(node: Dict[str, Any]) -> Optional[str]:
+    cover = node.get("coverArt")
+    sources: List[Any] = []
+    if isinstance(cover, dict):
+        raw = cover.get("sources")
+        sources = raw if isinstance(raw, list) else [cover]
+    elif isinstance(cover, str):
+        sources = [{"url": cover}]
+    best: Optional[str] = None
+    best_area = -1
+    for item in sources:
+        if not isinstance(item, dict):
+            continue
+        url = _safe_cover_url(item.get("url"))
+        if not url:
+            continue
+        area = (item.get("width") or 0) * (item.get("height") or 0)
+        if area >= best_area:
+            best, best_area = url, area
+    return best
+
+
+def _find_spotify_entity(node: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(node, dict):
+        if isinstance(node.get("trackList"), list):
+            return node
+        if node.get("type") in ("track", "album", "playlist") and (
+            "name" in node or "title" in node
+        ):
+            return node
+        for value in node.values():
+            found = _find_spotify_entity(value)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_spotify_entity(value)
+            if found is not None:
+                return found
+    return None
+
+
+def _spotify_entity_track(
+    entity: Dict[str, Any], source: str
+) -> Optional[Dict[str, Any]]:
+    title = entity.get("name") or entity.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return None
+    artists = _spotify_artists(entity.get("artists"))
+    artist = ", ".join(artists) if artists else entity.get("subtitle")
+    album = entity.get("album")
+    if isinstance(album, dict):
+        album = album.get("name")
+    return _music_entry(
+        source,
+        title,
+        artist if isinstance(artist, str) else None,
+        album if isinstance(album, str) else None,
+        entity.get("trackNumber"),
+        entity.get("duration") if entity.get("duration") is not None else entity.get("duration_ms"),
+        _spotify_cover(entity),
+        "spotify",
+    )
+
+
+def _spotify_entry(
+    item: Dict[str, Any],
+    index: int,
+    source: str,
+    top_artist: Optional[str],
+    album: Optional[str],
+    top_cover: Optional[str],
+) -> Dict[str, Any]:
+    uri = str(item.get("uri") or "")
+    match = re.match(r"spotify:track:([A-Za-z0-9]+)", uri, flags=re.IGNORECASE)
+    url = (
+        f"https://open.spotify.com/track/{match.group(1)}"
+        if match
+        else f"{source}#track-{index}"
+    )
+    artist = item.get("subtitle")
+    if not isinstance(artist, str) or not artist.strip():
+        names = _spotify_artists(item.get("artists"))
+        artist = ", ".join(names) if names else top_artist
+    item_album = item.get("album")
+    duration = (
+        item.get("duration") if item.get("duration") is not None else item.get("duration_ms")
+    )
+    return _music_entry(
+        url,
+        item.get("title") or item.get("name") or "Untitled",
+        artist if isinstance(artist, str) else top_artist,
+        item_album if isinstance(item_album, str) else album,
+        _positive_int(item.get("trackNumber")) or index,
+        duration,
+        _spotify_cover(item) or top_cover,
+        "spotify",
+    )
+
+
+async def _spotify_oembed(source: str) -> Optional[Dict[str, Any]]:
+    payload_text = await _get_text(
+        f"https://open.spotify.com/oembed?url={quote(source, safe='')}"
+    )
+    if not payload_text:
+        return None
+    try:
+        payload = json.loads(payload_text)
+    except (TypeError, ValueError):
+        return None
+    title = payload.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return None
+    return _music_entry(
+        source,
+        title,
+        payload.get("author_name"),
+        None,
+        None,
+        None,
+        payload.get("thumbnail_url"),
+        "spotify",
+    )
+
+
+async def _resolve_spotify(url: str) -> Dict[str, Any]:
+    kind, spotify_id = _spotify_target(url)
+    source = f"https://open.spotify.com/{kind}/{spotify_id}"
+    html_text = await _get_text(f"https://open.spotify.com/embed/{kind}/{spotify_id}")
+    data = _parse_script_json(html_text, "__NEXT_DATA__")
+    entity = _find_spotify_entity(data) if data is not None else None
+
+    if kind == "track":
+        entry = _spotify_entity_track(entity, source) if entity else None
+        if entry is None:
+            entry = await _spotify_oembed(source)
+        if entry is None:
+            raise ValueError(
+                "Could not read this Spotify track. It may be private or unavailable."
+            )
+        return _music_collection(
+            "spotify",
+            "track",
+            entry["title"],
+            entry["artist"],
+            entry["album"],
+            entry["thumbnail"],
+            [entry],
+        )
+
+    if entity is None:
+        raise ValueError("Spotify did not return a track list for this album or playlist.")
+    track_list = entity.get("trackList")
+    if not isinstance(track_list, list) or not track_list:
+        raise ValueError("Spotify did not return a track list for this album or playlist.")
+
+    title = entity.get("name") or entity.get("title") or "Spotify playlist"
+    artists = _spotify_artists(entity.get("artists"))
+    artist = ", ".join(artists) if artists else entity.get("subtitle")
+    if not isinstance(artist, str) or not artist.strip():
+        artist = None
+    cover = _spotify_cover(entity)
+    album = title if kind == "album" else None
+    entries: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(track_list, 1):
+        if not isinstance(item, dict):
+            continue
+        entry = _spotify_entry(item, index, source, artist, album, cover)
+        entry["url"] = _unique_music_url(entry["url"], source, index, seen)
+        entries.append(entry)
+    if not entries:
+        raise ValueError("Spotify did not return a track list for this album or playlist.")
+    if not artist:
+        artist = entries[0]["artist"]
+    return _music_collection(
+        "spotify", kind, title, artist, album, cover, entries
+    )
+
+
+def _apple_target(url: str) -> tuple[str, str, str, Optional[str]]:
+    parsed = urlparse(url)
+    source = urlunparse(parsed._replace(fragment=""))
+    path = parsed.path or "/"
+    query = parse_qs(parsed.query)
+    if "i" in query or "/song/" in path.lower():
+        kind = "track"
+    elif "/playlist/" in path.lower():
+        kind = "playlist"
+    else:
+        kind = "album"
+    embed = "https://embed.music.apple.com" + path
+    if parsed.query:
+        embed += "?" + parsed.query
+    return kind, source, embed, (query.get("i") or [None])[0]
+
+
+def _collect_apple_songs(
+    node: Any, songs: List[Dict[str, Any]], seen: set
+) -> None:
+    if isinstance(node, dict):
+        title = node.get("title")
+        artist = node.get("artistName")
+        node_type = str(node.get("type") or "").lower()
+        if (
+            isinstance(title, str)
+            and title.strip()
+            and isinstance(artist, str)
+            and artist.strip()
+            and node_type not in ("album", "playlist")
+        ):
+            key = node.get("id") or node.get("songId")
+            if not isinstance(key, (str, int)):
+                key = (title.strip().lower(), artist.strip().lower())
+            if key not in seen:
+                seen.add(key)
+                songs.append(node)
+        for value in node.values():
+            _collect_apple_songs(value, songs, seen)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_apple_songs(value, songs, seen)
+
+
+def _apple_artwork(node: Dict[str, Any]) -> Optional[str]:
+    artwork = node.get("artwork")
+    url = None
+    if isinstance(artwork, dict):
+        url = artwork.get("url") or artwork.get("template")
+    elif isinstance(artwork, str):
+        url = artwork
+    if not url:
+        url = node.get("artworkUrl")
+    safe = _safe_cover_url(url)
+    if not safe:
+        return None
+    return safe.replace("{w}", "600").replace("{h}", "600")
+
+
+def _apple_entry(
+    song: Dict[str, Any],
+    index: int,
+    fallback_url: str,
+    collection_album: Optional[str],
+    fallback_cover: Optional[str],
+) -> Dict[str, Any]:
+    candidate = song.get("url")
+    url = None
+    if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+        host = (urlparse(candidate).hostname or "").lower()
+        if host == "music.apple.com":
+            url = candidate
+    if not url:
+        url = fallback_url
+    album = song.get("albumName")
+    if not isinstance(album, str) or not album.strip():
+        album = collection_album
+    duration = song.get("durationInMillis")
+    if duration is None:
+        duration = song.get("duration")
+    return _music_entry(
+        url,
+        song.get("title") or song.get("name") or "Untitled",
+        song.get("artistName") if isinstance(song.get("artistName"), str) else None,
+        album if isinstance(album, str) else None,
+        _positive_int(song.get("trackNumber")) or index,
+        duration,
+        _apple_artwork(song) or fallback_cover,
+        "apple",
+    )
+
+
+async def _resolve_apple(url: str) -> Dict[str, Any]:
+    kind, source, embed_url, track_id = _apple_target(url)
+    html_text = await _get_text(embed_url)
+    data = _parse_script_json(html_text, "serialized-server-data")
+    songs: List[Dict[str, Any]] = []
+    if data is not None:
+        _collect_apple_songs(data, songs, set())
+    og_title = _meta_content(html_text or "", "og:title")
+    og_image = _safe_cover_url(_meta_content(html_text or "", "og:image"))
+
+    if kind == "track":
+        chosen = None
+        chosen_index = 1
+        if track_id:
+            for index, song in enumerate(songs, 1):
+                song_url = str(song.get("url") or "")
+                if f"i={track_id}" in song_url or str(song.get("id") or "") == str(track_id):
+                    chosen, chosen_index = song, index
+                    break
+        if chosen is None and songs:
+            chosen, chosen_index = songs[0], 1
+        if chosen is not None:
+            entry = _apple_entry(chosen, chosen_index, source, None, og_image)
+            return _music_collection(
+                "apple",
+                "track",
+                entry["title"],
+                entry["artist"],
+                entry["album"],
+                entry["thumbnail"],
+                [entry],
+            )
+        if og_title:
+            entry = _music_entry(
+                source, og_title, None, None, None, None, og_image, "apple"
+            )
+            return _music_collection(
+                "apple", "track", entry["title"], None, None, entry["thumbnail"], [entry]
+            )
+        raise ValueError(
+            "Could not read this Apple Music track. It may be private or unavailable."
+        )
+
+    if not songs:
+        raise ValueError(
+            "Apple Music did not return a track list for this album or playlist."
+        )
+    album = None
+    if kind == "album":
+        album = next(
+            (
+                song.get("albumName")
+                for song in songs
+                if isinstance(song.get("albumName"), str) and song.get("albumName")
+            ),
+            None,
+        )
+    entries: List[Dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for index, song in enumerate(songs, 1):
+        entry = _apple_entry(
+            song, index, f"{source}#track-{index}", album, og_image
+        )
+        entry["url"] = _unique_music_url(entry["url"], source, index, seen_urls)
+        entries.append(entry)
+    title = og_title or album or songs[0].get("title") or "Apple Music"
+    return _music_collection(
+        "apple",
+        kind,
+        title,
+        entries[0]["artist"],
+        album,
+        og_image or entries[0]["thumbnail"],
+        entries,
+    )
+
+
+async def resolve_music(url: str) -> Dict[str, Any]:
+    """Resolve a Spotify or Apple Music link into preview entries."""
+    target = str(url or "").strip()
+    if "://" not in target:
+        target = "https://" + target
+    if not is_music_url(target):
+        raise ValueError("This is not a supported Spotify or Apple Music link.")
+    host = (urlparse(target).hostname or "").lower()
+    if host == "open.spotify.com":
+        return await _resolve_spotify(target)
+    return await _resolve_apple(target)
+
+
+def _music_media_info(data: Dict[str, Any]) -> MediaInfo:
+    entries = [PreviewEntry(**entry) for entry in data.get("entries") or []]
+    platform = data.get("platform")
+    if data.get("media_type") == "track" and entries:
+        entry = entries[0]
+        return MediaInfo(
+            title=entry.title,
+            thumbnail=entry.thumbnail or data.get("thumbnail"),
+            duration=entry.duration,
+            uploader=entry.artist or data.get("artist"),
+            platform=platform,
+            formats=[],
+            media_type="video",
+            artist=entry.artist,
+            album=entry.album,
+            track_number=entry.track_number,
+            search_query=entry.search_query,
+        )
+    return MediaInfo(
+        title=data.get("title") or "Music",
+        thumbnail=data.get("thumbnail"),
+        uploader=data.get("artist"),
+        platform=platform,
+        entries=entries,
+        formats=[],
+        media_type="playlist",
+        artist=data.get("artist"),
+        album=data.get("album"),
+    )
+
+
+_PINTEREST_ORIGINAL_RE = re.compile(r"^(https?://i\.pinimg\.com/)[^/]+/", re.IGNORECASE)
+
+
+def _upgrade_pinterest_image(url: Optional[str]) -> Optional[str]:
+    """Ask Pinterest for the original image instead of the preview size."""
+    safe = _safe_cover_url(url)
+    if not safe:
+        return None
+    return _PINTEREST_ORIGINAL_RE.sub(r"\1originals/", safe)
+
+
+def _photo_referer(url: str) -> str:
+    lower = url.lower()
+    if "tiktok.com" in lower:
+        return "https://www.tiktok.com/"
+    if "pinterest." in lower or "pin.it" in lower:
+        return "https://www.pinterest.com/"
+    return "https://www.instagram.com/"
+
+
+async def _fetch_public_html(url: str, referer: Optional[str] = None) -> Optional[str]:
+    headers = {"User-Agent": TIKTOK_UA}
+    if referer:
+        headers["Referer"] = referer
+    try:
+        async with httpx.AsyncClient(
+            headers=headers, timeout=MUSIC_TIMEOUT, follow_redirects=False
+        ) as client:
+            current = url
+            for _ in range(4):
+                if not validate_url_not_private(current):
+                    return None
+                response = await client.get(current)
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        return None
+                    current = urljoin(current, location)
+                    continue
+                if response.status_code >= 400:
+                    return None
+                return response.text
+    except Exception:
+        return None
+    return None
+
+
+async def _fetch_pinterest_image(
+    url: str,
+) -> Optional[tuple[Optional[str], Optional[str], bool]]:
+    """Return (original image, title, has_video) from a Pinterest pin page."""
+    page = await _fetch_public_html(url, referer="https://www.pinterest.com/")
+    if not page:
+        return None
+    title = _meta_content(page, "og:title")
+    if _meta_content(page, "og:video") or _meta_content(page, "og:video:url"):
+        return None, title, True
+    image = _upgrade_pinterest_image(_meta_content(page, "og:image"))
+    if not image:
+        return None
+    return image, title, False
+
+
+async def _pinterest_image_info(url: str) -> Optional[MediaInfo]:
+    result = await _fetch_pinterest_image(url)
+    if not result:
+        return None
+    image, title, has_video = result
+    if has_video or not image:
+        return None
+    return MediaInfo(
+        title=title or "Pinterest pin",
+        thumbnail=image,
+        platform="pinterest",
+        images=[image],
+        media_type="image",
+    )
+
+
+def _has_playable_format(info: Dict[str, Any]) -> bool:
+    for item in info.get("formats") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("vcodec") not in (None, "none") or item.get("acodec") not in (None, "none"):
+            return True
+    return False
+
+
 def _get_base_opts(url: str = "") -> Dict[str, Any]:
     """Base options that bypass bot checks, solve JS challenges, and unlock full HD resolutions."""
     opts: Dict[str, Any] = {
@@ -608,6 +1363,9 @@ async def extract_info(url: str) -> MediaInfo:
     """Extract metadata without downloading."""
     if not validate_url_not_private(url):
         raise ValueError("Invalid or private URL not allowed")
+
+    if is_music_url(url):
+        return _music_media_info(await resolve_music(url))
 
     if "tiktok.com" in url.lower() and "/photo/" in url.lower():
         images, photo_title = await _fetch_tiktok_photos(url)
@@ -639,6 +1397,10 @@ async def extract_info(url: str) -> MediaInfo:
     try:
         info = await loop.run_in_executor(None, _extract)
     except Exception as e:
+        if _extract_platform(clean_url) == "pinterest":
+            fallback = await _pinterest_image_info(clean_url)
+            if fallback is not None:
+                return fallback
         friendly = _friendly_error(str(e), clean_url)
         if friendly:
             raise ValueError(friendly) from e
@@ -646,6 +1408,11 @@ async def extract_info(url: str) -> MediaInfo:
 
     if not isinstance(info, dict):
         raise ValueError("No media information found for this link")
+
+    if _extract_platform(clean_url) == "pinterest" and not _has_playable_format(info):
+        fallback = await _pinterest_image_info(clean_url)
+        if fallback is not None:
+            return fallback
 
     images = _collect_images(info) if is_photo else []
     if images:
@@ -760,6 +1527,8 @@ async def inspect_entries(url: str) -> List[dict]:
     """Flat playlist inspection: expanded entries, or one item for a single URL."""
     if not validate_url_not_private(url):
         raise ValueError("Invalid or private URL not allowed")
+    if is_music_url(url):
+        return (await resolve_music(url))["entries"]
     clean_url = _clean_url(url)
     info = await asyncio.get_running_loop().run_in_executor(None, _flat_info, clean_url)
     if not isinstance(info, dict):
@@ -859,8 +1628,13 @@ def _image_extension(url: str, content_type: str) -> str:
 
 
 def _find_output_file(tmp_dir: str, job_id: str) -> str:
+    cover_prefix = f"{job_id}.cover."
     for name in os.listdir(tmp_dir):
-        if name.startswith(job_id) and not name.endswith((".part", ".ytdl")):
+        if (
+            name.startswith(job_id)
+            and not name.startswith(cover_prefix)
+            and not name.endswith((".part", ".ytdl"))
+        ):
             return os.path.join(tmp_dir, name)
     raise FileNotFoundError(f"Output file not found for job {job_id}")
 
@@ -877,7 +1651,7 @@ async def _download_photo_post(
     if not images:
         raise ValueError("No downloadable photos were found in this post.")
 
-    referer = "https://www.tiktok.com/" if "tiktok.com" in original_url else "https://www.instagram.com/"
+    referer = _photo_referer(original_url)
     headers = {"User-Agent": TIKTOK_UA, "Referer": referer}
     saved: List[str] = []
 
@@ -940,6 +1714,126 @@ async def _download_photo_post(
     return zip_path, info.title
 
 
+async def _download_music_cover(
+    url: Optional[str], tmp_dir: str, job_id: str
+) -> Optional[str]:
+    """Best-effort cover fetch into tmp; queue cleanup owns the file."""
+    safe = _safe_cover_url(url)
+    if not safe or not validate_url_not_private(safe):
+        return None
+    headers = {"User-Agent": TIKTOK_UA, "Accept": "image/*"}
+    try:
+        async with httpx.AsyncClient(
+            headers=headers, timeout=MUSIC_TIMEOUT, follow_redirects=False
+        ) as client:
+            current = safe
+            for _ in range(4):
+                if not validate_url_not_private(current):
+                    return None
+                async with client.stream("GET", current) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            return None
+                        current = urljoin(current, location)
+                        continue
+                    if response.status_code >= 400:
+                        return None
+                    content_type = response.headers.get("content-type", "")
+                    if not content_type.startswith("image/"):
+                        return None
+                    path = os.path.join(
+                        tmp_dir,
+                        f"{job_id}.cover{_image_extension(current, content_type)}",
+                    )
+                    written = 0
+                    try:
+                        with open(path, "wb") as out:
+                            async for chunk in response.aiter_bytes(64 * 1024):
+                                written += len(chunk)
+                                if written > MAX_COVER_BYTES:
+                                    raise ValueError("Cover is larger than the 10 MB limit")
+                                out.write(chunk)
+                    except Exception:
+                        try:
+                            os.remove(path)
+                        except OSError:
+                            pass
+                        return None
+                    return path
+    except Exception:
+        return None
+    return None
+
+
+def _music_ffmpeg_args(
+    src: str,
+    dst: str,
+    metadata: Dict[str, Any],
+    cover_path: Optional[str] = None,
+) -> List[str]:
+    """Arguments after the ffmpeg executable. Kept pure for unit tests."""
+    metadata = metadata or {}
+    ext = os.path.splitext(dst)[1].lower()
+    args = ["-y", "-i", src]
+    if cover_path and ext in (".mp3", ".m4a", ".flac"):
+        args += [
+            "-i", cover_path,
+            "-map", "0:a", "-map", "1:v", "-c", "copy",
+            "-disposition:v", "attached_pic",
+            "-metadata:s:v", "title=Album cover",
+            "-metadata:s:v", "comment=Cover (front)",
+        ]
+    else:
+        args += ["-map_metadata", "0", "-c", "copy"]
+    for key in ("title", "artist", "album"):
+        value = metadata.get(key)
+        if value is not None and str(value).strip():
+            args += ["-metadata", f"{key}={str(value).strip()}"]
+    track = _positive_int(metadata.get("track_number"))
+    if track:
+        args += ["-metadata", f"track={track}"]
+    args.append(dst)
+    return args
+
+
+def _embed_music_metadata(
+    path: str,
+    metadata: Dict[str, Any],
+    cover_path: Optional[str] = None,
+) -> str:
+    """Attach tags/cover, falling back to the untagged file on any failure."""
+    ext = os.path.splitext(path)[1].lower()
+    temp_path = f"{path}.tagged{ext}"
+    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    attempts: List[List[str]] = []
+    if cover_path:
+        attempts.append(_music_ffmpeg_args(path, temp_path, metadata, cover_path))
+    attempts.append(_music_ffmpeg_args(path, temp_path, metadata, None))
+    for args in attempts:
+        try:
+            proc = subprocess.run(
+                [_ffmpeg_executable(), *args],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                creationflags=creationflags,
+            )
+        except Exception:
+            continue
+        if proc.returncode == 0 and os.path.isfile(temp_path):
+            try:
+                os.replace(temp_path, path)
+                return path
+            except OSError:
+                pass
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+    return path
+
+
 async def download_media(
     url: str,
     fmt: str,
@@ -952,16 +1846,50 @@ async def download_media(
     end_time: Optional[Any] = None,
     preset: Optional[str] = None,
     social_bypass: bool = False,
+    search_query: Optional[str] = None,
+    music_metadata: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, str]:
     """Download and convert media. Returns (final file path, title)."""
     if not validate_url_not_private(url):
         raise ValueError("Invalid or private URL not allowed")
+
+    if is_music_url(url) and not search_query:
+        resolved = await resolve_music(url)
+        if resolved.get("media_type") != "track":
+            raise ValueError(
+                "This is a Spotify or Apple Music album or playlist. "
+                "Select individual tracks to download."
+            )
+        entry = (resolved.get("entries") or [None])[0]
+        if not entry:
+            raise ValueError("No downloadable track was found for this music link.")
+        search_query = entry.get("search_query")
+        if not search_query:
+            raise ValueError("Could not build a search query for this music track.")
+        if music_metadata is None:
+            music_metadata = {
+                "title": entry.get("title"),
+                "artist": entry.get("artist"),
+                "album": entry.get("album"),
+                "track_number": entry.get("track_number"),
+                "thumbnail": entry.get("thumbnail") or resolved.get("thumbnail"),
+            }
+
     clean_url = _clean_url(url)
     start, end = validate_clip_range(start_time, end_time)
     preset_name = _normalize_preset(preset, social_bypass)
 
-    if fmt == "images" or ("tiktok.com" in url.lower() and "/photo/" in url.lower()):
+    if (
+        (fmt == "images" or ("tiktok.com" in url.lower() and "/photo/" in url.lower()))
+        and not search_query
+    ):
         return await _download_photo_post(url, tmp_dir, job_store, job_id, cancel_event)
+
+    download_url = clean_url
+    download_fmt = fmt
+    if search_query:
+        download_fmt = fmt if fmt in ("mp3", "m4a", "opus") else "mp3"
+        download_url = f"ytsearch1:{str(search_query).strip()}"
 
     filename_template = f"{job_id}.%(ext)s"
     output_path = os.path.join(tmp_dir, filename_template)
@@ -984,14 +1912,14 @@ async def download_media(
                 job_store[job_id]["progress"] = 99.0
 
     ydl_opts = _build_ydl_opts(
-        fmt, quality, output_path, progress_hook, clean_url, start, end
+        download_fmt, quality, output_path, progress_hook, download_url, start, end
     )
 
     loop = asyncio.get_event_loop()
 
     def _download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(clean_url, download=True)
+            info_dict = ydl.extract_info(download_url, download=True)
             return info_dict.get("title", "download") if info_dict else "download"
 
     try:
@@ -1008,6 +1936,19 @@ async def download_media(
     filepath = _find_output_file(tmp_dir, job_id)
     if preset_name:
         filepath = await loop.run_in_executor(None, _postprocess_file, filepath, preset_name)
+
+    if search_query or music_metadata is not None:
+        metadata = dict(music_metadata or {})
+        if not metadata.get("title"):
+            metadata["title"] = extracted_title
+        cover_path = None
+        if metadata.get("thumbnail"):
+            cover_path = await _download_music_cover(
+                metadata.get("thumbnail"), tmp_dir, job_id
+            )
+        filepath = await loop.run_in_executor(
+            None, _embed_music_metadata, filepath, metadata, cover_path
+        )
     return filepath, extracted_title
 
 

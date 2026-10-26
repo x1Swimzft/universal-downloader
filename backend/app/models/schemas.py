@@ -61,6 +61,10 @@ class PreviewEntry(BaseModel):
     thumbnail: Optional[str] = None
     platform: Optional[str] = None
     media_type: str = "video"
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    track_number: Optional[int] = None
+    search_query: Optional[str] = None
 
 
 class MediaInfo(BaseModel):
@@ -73,6 +77,10 @@ class MediaInfo(BaseModel):
     images: List[str] = []
     entries: List[PreviewEntry] = []
     media_type: str = "video"  # video | image | carousel | playlist
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    track_number: Optional[int] = None
+    search_query: Optional[str] = None
 
 
 class DownloadResponse(BaseModel):
