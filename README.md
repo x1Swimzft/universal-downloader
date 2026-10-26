@@ -1,9 +1,9 @@
 # Universal Downloader ⚡
 
-Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), TikTok (No Watermark), Instagram Reels, Facebook, Twitter/X, and SoundCloud.
+Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), TikTok (No Watermark), Instagram Reels, Facebook, Twitter/X, SoundCloud, Spotify, Apple Music, Twitch, Kick, Bilibili, Reddit, Pinterest, Vimeo, and Bandcamp.
 
 ![Universal Downloader](https://img.shields.io/badge/Platform-Windows%2011-blue?logo=windows)
-![Version](https://img.shields.io/badge/Release-v0.6.0-green)
+![Version](https://img.shields.io/badge/Release-v0.7.0-green)
 ![Electron](https://img.shields.io/badge/Electron-33.4.11-47848F?logo=electron)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi)
 ![Next.js](https://img.shields.io/badge/Next.js-14.2.35-black?logo=nextdotjs)
@@ -14,7 +14,11 @@ Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), T
 
 * **Native Windows 11 Desktop Shell**: Built with Electron, runs completely offline from the desktop without opening separate terminal windows.
 * **System Tray & Clipboard Watcher**: Minimizes to the Windows system tray and automatically detects copied media URLs from supported platforms.
-* **Real-time Download Queue**: Download multiple links simultaneously (concurrency limited to 3) with live progress bars, speed, and status over Server-Sent Events (SSE).
+* **Real-time Download Queue**: Download multiple links simultaneously (1–5 concurrent, default 3) with live progress bars, speed, and status over Server-Sent Events (SSE).
+* **Music Bridge**: Resolves public Spotify and Apple Music tracks, albums, and playlists, then downloads tagged audio with embedded cover art.
+* **Playlist Library**: Saves playlists and albums into sanitized subfolders with track-numbered filenames, and supports multi-link batch selection.
+* **Audio Filename Templates**: Names audio files with presets such as `{artist} - {title}` or `{track} - {artist} - {title}`.
+* **Creator Sites**: Works across Twitch, Kick, Bilibili, Reddit, Pinterest, Vimeo, SoundCloud, and Bandcamp without a domain allowlist.
 * **Direct Stream Piping**: Streams single-stream MP4 files directly to the client without redundant disk caching.
 * **Full HD / 4K & Audio Extraction**: Automatically handles Node.js runtime challenges with `yt-dlp` and merges video/audio with bundled FFmpeg.
 * **Self-Healing Engine**: Browser-cookie import (`cookies.txt` or Chrome/Edge/Brave/Firefox) and in-app `yt-dlp` updates from PyPI without reinstalling the app.
@@ -28,8 +32,8 @@ Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), T
 ## 🚀 Quick Download (Windows 11)
 
 Download the latest pre-packaged standalone release from the [`release/`](release/) directory:
-* **Installer**: `Universal Downloader Setup 0.6.0.exe` (One-click desktop setup)
-* **Portable**: `Universal Downloader-0.6.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
+* **Installer**: `Universal Downloader Setup 0.7.0.exe` (One-click desktop setup)
+* **Portable**: `Universal Downloader-0.7.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
 
 > **No dependencies needed:** Everything (Python engine, FFmpeg, and UI) is completely bundled.
 

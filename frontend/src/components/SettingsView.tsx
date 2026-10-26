@@ -269,7 +269,7 @@ export function SettingsView({
       <div className="group" aria-label="App updates">
         <SettingRow
           title="App updates"
-          subtitle="Universal Downloader v0.6.0"
+          subtitle="Universal Downloader v0.7.0"
         >
           <button
             type="button"
