@@ -645,43 +645,91 @@ def _find_key(node: Any, key: str) -> Any:
     return None
 
 
+_TIKTOK_MOBILE_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+)
+_TIKTOK_AWEME_RE = re.compile(r"/(?:photo|video)/(\d+)")
+
+
+def _tiktok_first_url(holder: Any) -> Optional[str]:
+    """First full-size CDN URL in a urlList holder."""
+    if isinstance(holder, dict) and isinstance(holder.get("urlList"), list):
+        for url in holder["urlList"]:
+            if isinstance(url, str) and url.startswith("http"):
+                return url
+    return None
+
+
+def _tiktok_image_urls(node: Any) -> List[str]:
+    """One full-size URL per image from an imagePost/imagePostInfo object."""
+    if not isinstance(node, dict):
+        return []
+    items = node.get("displayImages")
+    if not isinstance(items, list):
+        items = node.get("images")
+    if not isinstance(items, list):
+        return []
+    urls: List[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = (
+            _tiktok_first_url(item.get("imageURL"))
+            or _tiktok_first_url(item.get("displayImage"))
+            or _tiktok_first_url(item)
+        )
+        if url:
+            urls.append(url)
+    return urls
+
+
+def _tiktok_title(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    lines = html_lib.unescape(value).strip().splitlines()
+    title = lines[0].strip() if lines else ""
+    return title[:120].rstrip() or None
+
+
 def _parse_tiktok_photo_html(html: str) -> tuple[List[str], Optional[str]]:
-    """Extract slideshow image URLs from TikTok's hydration JSON."""
+    """Extract full-size slideshow URLs and a title from any TikTok page variant."""
+    images: List[str] = []
+    title: Optional[str] = None
+
     match = re.search(
         r'<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
         html,
         re.DOTALL | re.IGNORECASE,
     )
-    if not match:
-        return [], None
-    try:
-        data = json.loads(match.group(1))
-    except (TypeError, ValueError):
-        return [], None
+    if match:
+        try:
+            data = json.loads(match.group(1))
+        except (TypeError, ValueError):
+            data = None
+        if isinstance(data, dict):
+            for key in ("imagePost", "imagePostInfo"):
+                node = _find_key(data, key)
+                if isinstance(node, dict):
+                    images.extend(_tiktok_image_urls(node))
+                    title = title or _tiktok_title(
+                        node.get("title") or node.get("desc")
+                    )
+            title = title or _tiktok_title(_find_key(data, "desc"))
 
-    image_post = _find_key(data, "imagePost")
-    if not isinstance(image_post, dict):
-        return [], None
+    # Page variants keep these objects outside the hydration script (mobile/embed).
+    for marker in ('"imagePost"', '"imagePostInfo"'):
+        node = _json_object_after(html, marker)
+        if isinstance(node, dict):
+            images.extend(_tiktok_image_urls(node))
+            title = title or _tiktok_title(node.get("title") or node.get("desc"))
 
-    images: List[str] = []
-    for item in image_post.get("images") or []:
-        if not isinstance(item, dict):
-            continue
-        urls: List[str] = []
-        for holder in ("imageURL", "displayImage"):
-            value = item.get(holder)
-            if isinstance(value, dict) and isinstance(value.get("urlList"), list):
-                urls = [u for u in value["urlList"] if isinstance(u, str) and u.startswith("http")]
-                if urls:
-                    break
-        if urls:
-            images.append(urls[0])
-    title = _find_key(data, "desc")
-    return list(dict.fromkeys(images)), title if isinstance(title, str) else None
+    title = title or _tiktok_title(_meta_content(html, "og:title"))
+    return list(dict.fromkeys(images)), title
 
 
-async def _fetch_tiktok_photos(url: str) -> tuple[List[str], Optional[str]]:
-    headers = {"User-Agent": TIKTOK_UA, "Referer": "https://www.tiktok.com/"}
+async def _tiktok_fetch_html(url: str, user_agent: str) -> Optional[str]:
+    headers = {"User-Agent": user_agent, "Referer": "https://www.tiktok.com/"}
     try:
         async with httpx.AsyncClient(
             headers=headers, timeout=20.0, follow_redirects=False
@@ -689,19 +737,45 @@ async def _fetch_tiktok_photos(url: str) -> tuple[List[str], Optional[str]]:
             current = url
             for _ in range(4):
                 if not validate_url_not_private(current):
-                    return [], None
+                    return None
                 resp = await client.get(current)
                 if resp.is_redirect:
                     location = resp.headers.get("location")
                     if not location:
-                        return [], None
+                        return None
                     current = urljoin(current, location)
+                    host = (urlparse(current).hostname or "").lower()
+                    if host != "tiktok.com" and not host.endswith(".tiktok.com"):
+                        return None
                     continue
                 if resp.status_code >= 400:
-                    return [], None
-                return _parse_tiktok_photo_html(resp.text)
+                    return None
+                return resp.text
     except Exception:
-        return [], None
+        return None
+    return None
+
+
+async def _fetch_tiktok_photos(url: str) -> tuple[List[str], Optional[str]]:
+    """Try desktop, mobile, then embed pages for photo slideshow images."""
+    clean = str(url or "").strip()
+    candidates = [(clean, TIKTOK_UA)]
+    separator = "&" if "?" in clean else "?"
+    candidates.append(
+        (clean + separator + "is_from_webapp=1&sender_device=pc", _TIKTOK_MOBILE_UA)
+    )
+    aweme_match = _TIKTOK_AWEME_RE.search(clean)
+    if aweme_match:
+        candidates.append(
+            (f"https://www.tiktok.com/embed/v2/{aweme_match.group(1)}", TIKTOK_UA)
+        )
+    for candidate, agent in candidates:
+        page = await _tiktok_fetch_html(candidate, agent)
+        if not page:
+            continue
+        images, title = _parse_tiktok_photo_html(page)
+        if images:
+            return images, title
     return [], None
 
 
@@ -1753,6 +1827,42 @@ def _has_playable_format(info: Dict[str, Any]) -> bool:
     return False
 
 
+def _is_audio_only(f: Dict[str, Any]) -> bool:
+    return f.get("vcodec") == "none" and f.get("acodec") != "none"
+
+
+def _audio_format(f: Dict[str, Any]) -> FormatOption:
+    bitrate = f.get("abr") or f.get("tbr")
+    return FormatOption(
+        format_id=f.get("format_id", ""),
+        ext=f.get("ext", ""),
+        resolution="audio",
+        filesize=f.get("filesize") or f.get("filesize_approx"),
+        note=f"audio {bitrate}kbps" if bitrate else "audio",
+    )
+
+
+def _audio_formats(info: Dict[str, Any]) -> list[FormatOption]:
+    return [
+        _audio_format(f)
+        for f in info.get("formats") or []
+        if isinstance(f, dict) and _is_audio_only(f)
+    ]
+
+
+def _tiktok_photo_info(
+    images: List[str], title: Optional[str], formats: list[FormatOption]
+) -> MediaInfo:
+    return MediaInfo(
+        title=title or "TikTok photo",
+        thumbnail=images[0],
+        platform="tiktok",
+        images=images,
+        formats=formats,
+        media_type="carousel" if len(images) > 1 else "image",
+    )
+
+
 def _get_base_opts(url: str = "") -> Dict[str, Any]:
     """Base options that bypass bot checks, solve JS challenges, and unlock full HD resolutions."""
     opts: Dict[str, Any] = {
@@ -1779,16 +1889,11 @@ async def extract_info(url: str) -> MediaInfo:
     if is_music_url(url):
         return _music_media_info(await resolve_music(url))
 
-    if "tiktok.com" in url.lower() and "/photo/" in url.lower():
-        images, photo_title = await _fetch_tiktok_photos(url)
-        if images:
-            return MediaInfo(
-                title=photo_title or "TikTok photo",
-                thumbnail=images[0],
-                platform="tiktok",
-                images=images,
-                media_type="carousel" if len(images) > 1 else "image",
-            )
+    is_tiktok_photo = "tiktok.com" in url.lower() and "/photo/" in url.lower()
+    photo_images: List[str] = []
+    photo_title: Optional[str] = None
+    if is_tiktok_photo:
+        photo_images, photo_title = await _fetch_tiktok_photos(url)
 
     clean_url = _clean_url(url)
     ig_target = _instagram_shortcode(clean_url)
@@ -1819,6 +1924,8 @@ async def extract_info(url: str) -> MediaInfo:
     try:
         info = await loop.run_in_executor(None, _extract)
     except Exception as e:
+        if is_tiktok_photo and photo_images:
+            return _tiktok_photo_info(photo_images, photo_title, [])
         if _extract_platform(clean_url) == "pinterest":
             fallback = await _pinterest_image_info(clean_url)
             if fallback is not None:
@@ -1839,6 +1946,11 @@ async def extract_info(url: str) -> MediaInfo:
 
     if not isinstance(info, dict):
         raise ValueError("No media information found for this link")
+
+    if is_tiktok_photo and photo_images:
+        return _tiktok_photo_info(
+            photo_images, photo_title or info.get("title"), _audio_formats(info)
+        )
 
     if _extract_platform(clean_url) == "pinterest" and not _has_playable_format(info):
         fallback = await _pinterest_image_info(clean_url)
@@ -1899,15 +2011,7 @@ async def extract_info(url: str) -> MediaInfo:
                     )
                 )
         elif vcodec == "none" and acodec != "none":
-            formats.append(
-                FormatOption(
-                    format_id=f.get("format_id", ""),
-                    ext=ext,
-                    resolution="audio",
-                    filesize=f.get("filesize") or f.get("filesize_approx"),
-                    note=f"audio {f.get('abr', '')}kbps",
-                )
-            )
+            formats.append(_audio_format(f))
 
     raw_duration = info.get("duration")
     duration = round(raw_duration) if isinstance(raw_duration, (int, float)) else None
@@ -1960,6 +2064,19 @@ async def inspect_entries(url: str) -> List[dict]:
         raise ValueError("Invalid or private URL not allowed")
     if is_music_url(url):
         return (await resolve_music(url))["entries"]
+    if "tiktok.com" in url.lower() and "/photo/" in url.lower():
+        images, title = await _fetch_tiktok_photos(url)
+        if images:
+            return [
+                {
+                    "url": url,
+                    "title": title or "TikTok photo",
+                    "duration": None,
+                    "thumbnail": images[0],
+                    "platform": "tiktok",
+                    "media_type": "carousel" if len(images) > 1 else "image",
+                }
+            ]
     clean_url = _clean_url(url)
     ig_target = _instagram_shortcode(clean_url)
     embed_attempted = False
@@ -2333,9 +2450,12 @@ async def download_media(
     start, end = validate_clip_range(start_time, end_time)
     preset_name = _normalize_preset(preset, social_bypass)
 
-    if (
-        (fmt == "images" or ("tiktok.com" in url.lower() and "/photo/" in url.lower()))
-        and not search_query
+    is_tiktok_photo = "tiktok.com" in url.lower() and "/photo/" in url.lower()
+    # Images, and legacy video/default requests, use the photo ZIP path.
+    # Audio codecs stay on yt-dlp so the background music is downloadable.
+    if not search_query and (
+        fmt == "images"
+        or (is_tiktok_photo and fmt not in ("mp3", "m4a", "opus"))
     ):
         return await _download_photo_post(url, tmp_dir, job_store, job_id, cancel_event)
 

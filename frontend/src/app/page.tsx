@@ -30,7 +30,11 @@ import {
 import { SvgSprite, Icon } from "@/components/Icons";
 import { Sidebar, SidebarView } from "@/components/Sidebar";
 import { UrlBar } from "@/components/UrlBar";
-import { PreviewCard, DownloadChoices } from "@/components/PreviewCard";
+import {
+  PreviewCard,
+  DownloadChoices,
+  DownloadMode,
+} from "@/components/PreviewCard";
 import { DownloadCard } from "@/components/DownloadCard";
 import { HistoryView } from "@/components/HistoryView";
 import { SettingsView } from "@/components/SettingsView";
@@ -112,9 +116,12 @@ function PreviewSkeleton() {
 }
 
 function mapSelectionToFormatQuality(
-  mode: "Video" | "Audio",
+  mode: DownloadMode,
   selectedOption: string
 ): { format: DownloadFormat; quality: string } {
+  if (mode === "Images") {
+    return { format: "images", quality: "" };
+  }
   if (mode === "Audio") {
     if (selectedOption === "M4A") return { format: "m4a", quality: "0" };
     if (selectedOption === "OPUS") return { format: "opus", quality: "0" };
@@ -142,7 +149,7 @@ export default function Home() {
     ""
   );
   const [info, setInfo] = useState<MediaInfo | null>(null);
-  const [mode, setMode] = useState<"Video" | "Audio">("Video");
+  const [mode, setMode] = useState<DownloadMode>("Video");
   const [selectedOption, setSelectedOption] = useState("1080p");
   const [startingDownload, setStartingDownload] = useState(false);
 
@@ -304,7 +311,10 @@ export default function Home() {
           if (music) {
             setMode("Audio");
             setSelectedOption("MP3 320k");
-          } else if (isPlaylist || isImagePost) {
+          } else if (isImagePost) {
+            setMode("Images");
+            setSelectedOption("1080p");
+          } else if (isPlaylist) {
             setMode("Video");
             setSelectedOption("1080p");
           } else if (!hasVideo || media.platform === "soundcloud") {
@@ -392,9 +402,15 @@ export default function Home() {
     }
   };
 
-  const handleModeChange = (nextMode: "Video" | "Audio") => {
+  const handleModeChange = (nextMode: DownloadMode) => {
     setMode(nextMode);
-    setSelectedOption(nextMode === "Video" ? "1080p" : "MP3 320k");
+    setSelectedOption(
+      nextMode === "Video"
+        ? "1080p"
+        : nextMode === "Audio"
+          ? "MP3 320k"
+          : "1080p" // unused for Images, keeps a sane fallback value
+    );
   };
 
   const handleStartDownload = async (choices?: DownloadChoices) => {
@@ -403,11 +419,10 @@ export default function Home() {
     setErrorMsg("");
     setFetchErrorAction("");
     try {
-      const isImagePost =
-        info.media_type === "image" || info.media_type === "carousel";
-      const { format, quality } = isImagePost
-        ? { format: "images" as DownloadFormat, quality: "" }
-        : mapSelectionToFormatQuality(mode, selectedOption);
+      const { format, quality } = mapSelectionToFormatQuality(
+        mode,
+        selectedOption
+      );
       await enqueueDownload(url.trim(), format, quality, info.title, {
         ...choices,
         socialBypass: settings.socialBypass,

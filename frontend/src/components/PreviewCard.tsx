@@ -4,6 +4,8 @@ import { Icon } from "./Icons";
 import { Switch } from "./Switch";
 import { MediaInfo, PreviewEntry } from "../lib/api";
 
+export type DownloadMode = "Images" | "Video" | "Audio";
+
 export interface DownloadChoices {
   startTime?: string;
   endTime?: string;
@@ -13,8 +15,8 @@ export interface DownloadChoices {
 
 export interface PreviewCardProps {
   info: MediaInfo;
-  mode: "Video" | "Audio";
-  onModeChange: (m: "Video" | "Audio") => void;
+  mode: DownloadMode;
+  onModeChange: (m: DownloadMode) => void;
   selectedOption: string;
   onSelectOption: (q: string) => void;
   saveFolder: string;
@@ -155,6 +157,25 @@ export function PreviewCard({
     info.media_type === "image" ||
     info.media_type === "carousel" ||
     (images.length > 0 && (info.formats?.length || 0) === 0);
+  const hasBackgroundAudio = Boolean(
+    info.formats?.some(
+      (f) =>
+        f.resolution === "audio" ||
+        (f.note || "").toLowerCase().startsWith("audio")
+    )
+  );
+  // Photo posts have no Video tab; without background audio "Images" is the only mode.
+  const effectiveMode: DownloadMode = isImagePost
+    ? mode === "Video" || !hasBackgroundAudio
+      ? "Images"
+      : mode
+    : mode === "Images"
+      ? "Video"
+      : mode;
+
+  useEffect(() => {
+    if (mode !== effectiveMode) onModeChange(effectiveMode);
+  }, [effectiveMode, mode, onModeChange]);
 
   useEffect(() => {
     setPreset("");
@@ -165,7 +186,8 @@ export function PreviewCard({
 
   const parts: string[] = [];
   const dur = formatDuration(info.duration);
-  if (dur) parts.push(dur);
+  const showSlideMeta = isImagePost && effectiveMode === "Images";
+  if (dur && !showSlideMeta) parts.push(dur);
 
   if (isPlaylist) {
     parts.push(`${entries.length} item${entries.length === 1 ? "" : "s"}`);
@@ -176,7 +198,14 @@ export function PreviewCard({
   }
 
   if (isImagePost) {
-    parts.push(`${images.length || 1} photo${images.length === 1 ? "" : "s"}`);
+    if (showSlideMeta) {
+      const count = images.length || 1;
+      parts.push(
+        count > 1
+          ? `${count} slides`
+          : `${count} photo${count === 1 ? "" : "s"}`
+      );
+    }
   } else {
     const matchedFormat = info.formats?.find(
       (f) =>
@@ -200,8 +229,24 @@ export function PreviewCard({
   }
 
   const metaText = parts.join(" · ");
-  const currentOptions = mode === "Video" ? VIDEO_OPTIONS : AUDIO_OPTIONS;
+  const currentOptions =
+    effectiveMode === "Video" ? VIDEO_OPTIONS : AUDIO_OPTIONS;
+  const imageModeOptions: SegmentOption[] = [
+    {
+      value: "Images",
+      label:
+        images.length > 1 ? `Photos · ${images.length} slides` : "Photo",
+    },
+    ...(hasBackgroundAudio ? [{ value: "Audio", label: "Audio" }] : []),
+  ];
   const thumb = info.thumbnail || images[0];
+  const downloadLabel = isImagePost
+    ? effectiveMode === "Images"
+      ? images.length > 1
+        ? "Download photos"
+        : "Download photo"
+      : "Download audio"
+    : "Download";
 
   return (
     <div className="res show" id="res">
@@ -217,7 +262,7 @@ export function PreviewCard({
         ) : (
           <Icon name="p" />
         )}
-        {dur && <span className="thumb-dur">{dur}</span>}
+        {dur && !showSlideMeta && <span className="thumb-dur">{dur}</span>}
       </div>
 
       <div className="info">
@@ -231,27 +276,55 @@ export function PreviewCard({
 
         {isImagePost ? (
           <>
-            <div className="photos" aria-label={`${images.length} photos`}>
-              {images.slice(0, 4).map((src, index) => (
-                <span className="photo" key={`${src}-${index}`}>
-                  <Image
-                    src={src}
-                    alt={`Photo ${index + 1}`}
-                    fill
-                    unoptimized
-                    style={{ objectFit: "cover" }}
-                  />
+            <Segmented
+              label="Media type"
+              className="mode"
+              options={imageModeOptions}
+              value={effectiveMode}
+              onChange={(value) => onModeChange(value as DownloadMode)}
+            />
+            {effectiveMode === "Images" ? (
+              <>
+                <div className="photos" aria-label={`${images.length} photos`}>
+                  {images.slice(0, 4).map((src, index) => (
+                    <span className="photo" key={`${src}-${index}`}>
+                      <Image
+                        src={src}
+                        alt={`Photo ${index + 1}`}
+                        fill
+                        unoptimized
+                        style={{ objectFit: "cover" }}
+                      />
+                    </span>
+                  ))}
+                  {images.length > 4 && (
+                    <span className="photo-more">+{images.length - 4}</span>
+                  )}
+                </div>
+                <span className="photo-note">
+                  {images.length > 1
+                    ? "Carousel saved as a ZIP of full-size photos."
+                    : "Full-size photo saved without re-encoding."}
                 </span>
-              ))}
-              {images.length > 4 && (
-                <span className="photo-more">+{images.length - 4}</span>
-              )}
-            </div>
-            <span className="photo-note">
-              {images.length > 1
-                ? "Carousel saved as a ZIP of full-size photos."
-                : "Full-size photo saved without re-encoding."}
-            </span>
+              </>
+            ) : (
+              <>
+                <Segmented
+                  label="Quality"
+                  className="quality"
+                  options={AUDIO_OPTIONS}
+                  value={selectedOption}
+                  onChange={onSelectOption}
+                />
+                <Segmented
+                  label="Edit preset"
+                  className="preset"
+                  options={PRESET_OPTIONS}
+                  value={preset}
+                  onChange={setPreset}
+                />
+              </>
+            )}
           </>
         ) : (
           <>
@@ -260,7 +333,7 @@ export function PreviewCard({
               className="mode"
               options={MODE_OPTIONS}
               value={mode}
-              onChange={(value) => onModeChange(value as "Video" | "Audio")}
+              onChange={(value) => onModeChange(value as DownloadMode)}
             />
             <Segmented
               label="Quality"
@@ -396,7 +469,9 @@ export function PreviewCard({
             onClick={() =>
               onDownload(
                 isImagePost
-                  ? undefined
+                  ? effectiveMode === "Images"
+                    ? undefined
+                    : { preset: preset || undefined }
                   : {
                       startTime: startTime.trim() || undefined,
                       endTime: endTime.trim() || undefined,
@@ -407,13 +482,7 @@ export function PreviewCard({
             disabled={downloading}
           >
             <Icon name="dl" />
-            {downloading
-              ? "Starting…"
-              : isImagePost
-                ? images.length > 1
-                  ? "Download photos"
-                  : "Download photo"
-                : "Download"}
+            {downloading ? "Starting…" : downloadLabel}
           </button>
         )}
       </div>

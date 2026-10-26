@@ -1339,6 +1339,242 @@ class TestInstagramEmbedFallback(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entries[0]["media_type"], "image")
 
 
+class TestTikTokPhoto(unittest.IsolatedAsyncioTestCase):
+    PHOTO_URL = "https://www.tiktok.com/@lucasvisual/photo/7508048429776407830"
+    IMAGES = [f"https://cdn.example/{i}.jpg" for i in range(1, 4)]
+
+    def _mobile_html(self, images=None, title="Mobile title"):
+        payload = {
+            "imagePost": {
+                "title": title,
+                "images": [
+                    {"imageURL": {"urlList": [url, url + "?mirror=1"]}}
+                    for url in (images or self.IMAGES)
+                ],
+            }
+        }
+        return f"<html><body><script>window.__X = {json.dumps(payload)};</script></body></html>"
+
+    def _embed_html(self, images=None):
+        payload = {
+            "imagePostInfo": {
+                "title": "Embed title",
+                "displayImages": [
+                    {"urlList": [url, url + "?mirror=1"]}
+                    for url in (images or self.IMAGES)
+                ],
+            }
+        }
+        return f"<html><body><script>window.__X = {json.dumps(payload)};</script></body></html>"
+
+    def test_parser_embed_shape(self):
+        images, title = _parse_tiktok_photo_html(self._embed_html())
+        self.assertEqual(images, self.IMAGES)
+        self.assertEqual(title, "Embed title")
+
+    def test_parser_mobile_shape(self):
+        images, title = _parse_tiktok_photo_html(self._mobile_html())
+        self.assertEqual(images, self.IMAGES)
+        self.assertEqual(title, "Mobile title")
+
+    def test_parser_keeps_url_list_order_without_duplicates(self):
+        html = self._mobile_html(images=self.IMAGES + [self.IMAGES[0]])
+        images, _ = _parse_tiktok_photo_html(html)
+        self.assertEqual(images, self.IMAGES)
+
+    async def test_fetch_falls_back_to_mobile_page(self):
+        routes = {
+            "is_from_webapp": _FakeResponse(self._mobile_html()),
+            "tiktok.com/@lucasvisual/photo/": _FakeResponse("<html></html>"),
+        }
+        with patch.object(extractor, "validate_url_not_private", return_value=True):
+            with _fake_http(routes):
+                images, title = await extractor._fetch_tiktok_photos(self.PHOTO_URL)
+        self.assertEqual(images, self.IMAGES)
+        self.assertEqual(title, "Mobile title")
+
+    async def test_fetch_falls_back_to_embed_page(self):
+        routes = {
+            "is_from_webapp": _FakeResponse("<html></html>"),
+            "embed/v2/7508048429776407830": _FakeResponse(self._embed_html()),
+            "tiktok.com/@lucasvisual/photo/": _FakeResponse("<html></html>"),
+        }
+        with patch.object(extractor, "validate_url_not_private", return_value=True):
+            with _fake_http(routes):
+                images, title = await extractor._fetch_tiktok_photos(self.PHOTO_URL)
+        self.assertEqual(images, self.IMAGES)
+        self.assertEqual(title, "Embed title")
+
+    async def test_extract_info_audio_only_format_is_not_video(self):
+        class _AudioOnlyYDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=False):
+                self.url = url
+                return {
+                    "title": "Audio title",
+                    "duration": 16,
+                    "formats": [
+                        {
+                            "format_id": "audio-1",
+                            "ext": "m4a",
+                            "vcodec": "none",
+                            "acodec": "aac",
+                            "abr": 128,
+                            "filesize": 512000,
+                        }
+                    ],
+                }
+
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor,
+            "_fetch_tiktok_photos",
+            AsyncMock(return_value=(self.IMAGES, "Photo title")),
+        ), patch.object(
+            extractor.yt_dlp, "YoutubeDL", _AudioOnlyYDL
+        ):
+            info = await extract_info(self.PHOTO_URL)
+
+        self.assertEqual(info.media_type, "carousel")
+        self.assertNotIn(info.media_type, ("video", "audio"))
+        self.assertEqual(info.images, self.IMAGES)
+        self.assertEqual(info.thumbnail, self.IMAGES[0])
+        self.assertEqual(info.title, "Photo title")
+        self.assertEqual(info.platform, "tiktok")
+        self.assertIsNone(info.duration)
+        self.assertEqual(len(info.formats), 1)
+        self.assertEqual(info.formats[0].resolution, "audio")
+        self.assertEqual(info.formats[0].ext, "m4a")
+        self.assertIn("128", info.formats[0].note)
+
+    async def test_extract_info_returns_images_when_ytdlp_fails(self):
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor,
+            "_fetch_tiktok_photos",
+            AsyncMock(return_value=(self.IMAGES, "Photo title")),
+        ), patch.object(
+            extractor.yt_dlp,
+            "YoutubeDL",
+            MagicMock(side_effect=RuntimeError("Unsupported URL")),
+        ):
+            info = await extract_info(self.PHOTO_URL)
+
+        self.assertEqual(info.media_type, "carousel")
+        self.assertEqual(info.images, self.IMAGES)
+        self.assertEqual(info.formats, [])
+        self.assertIsNone(info.duration)
+
+    async def test_inspect_entries_returns_photo_preview(self):
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor,
+            "_fetch_tiktok_photos",
+            AsyncMock(return_value=(self.IMAGES, "Photo title")),
+        ), patch.object(
+            extractor, "_flat_info", MagicMock()
+        ) as flat:
+            entries = await inspect_entries(self.PHOTO_URL)
+
+        flat.assert_not_called()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["url"], self.PHOTO_URL)
+        self.assertEqual(entries[0]["title"], "Photo title")
+        self.assertEqual(entries[0]["duration"], None)
+        self.assertEqual(entries[0]["thumbnail"], self.IMAGES[0])
+        self.assertEqual(entries[0]["platform"], "tiktok")
+        self.assertEqual(entries[0]["media_type"], "carousel")
+
+    async def test_download_audio_uses_ytdlp_not_photo_zip(self):
+        class _DownloadYDL:
+            last_url = None
+            last_opts = None
+
+            def __init__(self, opts):
+                _DownloadYDL.last_opts = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=True):
+                _DownloadYDL.last_url = url
+                return {"title": "Audio title"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            job_id = "tiktok-audio"
+            with open(os.path.join(tmp, f"{job_id}.mp3"), "wb") as handle:
+                handle.write(b"x")
+            photo_download = AsyncMock(return_value=("zip", "title"))
+            with patch.object(
+                extractor, "validate_url_not_private", return_value=True
+            ), patch.object(
+                extractor, "_download_photo_post", photo_download
+            ), patch.object(
+                extractor.yt_dlp, "YoutubeDL", _DownloadYDL
+            ):
+                filepath, _ = await download_media(
+                    self.PHOTO_URL, "mp3", "320", tmp, {}, job_id
+                )
+
+        photo_download.assert_not_awaited()
+        self.assertTrue(filepath.endswith(f"{job_id}.mp3"))
+        self.assertEqual(
+            _DownloadYDL.last_url,
+            "https://www.tiktok.com/@lucasvisual/video/7508048429776407830",
+        )
+        self.assertIn("bestaudio", _DownloadYDL.last_opts["format"])
+
+    async def test_download_images_uses_photo_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_download = AsyncMock(return_value=("bundle.zip", "Photo title"))
+            with patch.object(
+                extractor, "validate_url_not_private", return_value=True
+            ), patch.object(
+                extractor, "_download_photo_post", photo_download
+            ), patch.object(
+                extractor.yt_dlp, "YoutubeDL", MagicMock()
+            ) as ydl:
+                filepath, title = await download_media(
+                    self.PHOTO_URL, "images", "1080", tmp, {}, "tiktok-images"
+                )
+
+        ydl.assert_not_called()
+        photo_download.assert_awaited_once()
+        self.assertEqual(photo_download.await_args.args[0], self.PHOTO_URL)
+        self.assertEqual((filepath, title), ("bundle.zip", "Photo title"))
+
+    async def test_download_legacy_video_request_uses_photo_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            photo_download = AsyncMock(return_value=("bundle.zip", "Photo title"))
+            with patch.object(
+                extractor, "validate_url_not_private", return_value=True
+            ), patch.object(
+                extractor, "_download_photo_post", photo_download
+            ), patch.object(
+                extractor.yt_dlp, "YoutubeDL", MagicMock()
+            ) as ydl:
+                await download_media(
+                    self.PHOTO_URL, "mp4", "1080", tmp, {}, "tiktok-legacy"
+                )
+
+        ydl.assert_not_called()
+        photo_download.assert_awaited_once()
+
+
 class TestCookieOptionInjection(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         set_cookie_preferences(cookies_from_browser="none", cookies_file="")
