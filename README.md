@@ -219,7 +219,7 @@ Supports the same formats and creator sites as the desktop app.
 
 The current release was checked with:
 
-- `pytest` — 132 tests / 89 subtests
+- `pytest` - 134 tests / 89 subtests
 - `npm run build` — Next.js production build
 - Packaged startup, installed startup, menu/shortcut, and updater IPC smoke tests
 - Live TikTok Photo Mode extraction, ZIP download, and background-audio MP3 download
