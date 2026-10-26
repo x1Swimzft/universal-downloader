@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { Icon } from "./Icons";
-import { MediaInfo } from "../lib/api";
+import { MediaInfo, PreviewEntry } from "../lib/api";
 
 export interface DownloadChoices {
   startTime?: string;
@@ -18,6 +18,8 @@ export interface PreviewCardProps {
   saveFolder: string;
   onDownload: (choices?: DownloadChoices) => void;
   downloading?: boolean;
+  onEnqueueSelected?: (entries: PreviewEntry[], choices?: DownloadChoices) => void;
+  enqueueing?: boolean;
 }
 
 interface SegmentOption {
@@ -119,10 +121,31 @@ export function PreviewCard({
   saveFolder,
   onDownload,
   downloading,
+  onEnqueueSelected,
+  enqueueing,
 }: PreviewCardProps) {
   const [preset, setPreset] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const entries = info.entries || [];
+  const entryUrls = entries.map((entry) => entry.url).join("\n");
+  const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelectedUrls(new Set(entryUrls ? entryUrls.split("\n") : []));
+  }, [entryUrls]);
+
+  const isPlaylist = entries.length > 0;
+  const selectedEntries = entries.filter((entry) => selectedUrls.has(entry.url));
+
+  const toggleEntry = (entryUrl: string) => {
+    setSelectedUrls((current) => {
+      const next = new Set(current);
+      if (next.has(entryUrl)) next.delete(entryUrl);
+      else next.add(entryUrl);
+      return next;
+    });
+  };
 
   const images = info.images || [];
   const isImagePost =
@@ -139,6 +162,10 @@ export function PreviewCard({
   const parts: string[] = [];
   const dur = formatDuration(info.duration);
   if (dur) parts.push(dur);
+
+  if (isPlaylist) {
+    parts.push(`${entries.length} item${entries.length === 1 ? "" : "s"}`);
+  }
 
   if (info.uploader) {
     parts.push(info.uploader);
@@ -245,33 +272,98 @@ export function PreviewCard({
               value={preset}
               onChange={setPreset}
             />
-            <div className="clip-row">
-              <label className="time-field">
-                <span>Start</span>
-                <input
-                  className="time-input"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="MM:SS"
-                  aria-label="Clip start time"
-                  value={startTime}
-                  onChange={(event) => setStartTime(event.target.value)}
-                />
-              </label>
-              <label className="time-field">
-                <span>End</span>
-                <input
-                  className="time-input"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="MM:SS"
-                  aria-label="Clip end time"
-                  value={endTime}
-                  onChange={(event) => setEndTime(event.target.value)}
-                />
-              </label>
-              <span className="clip-hint">Optional · MM:SS or HH:MM:SS</span>
-            </div>
+            {!isPlaylist && (
+              <div className="clip-row">
+                <label className="time-field">
+                  <span>Start</span>
+                  <input
+                    className="time-input"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="MM:SS"
+                    aria-label="Clip start time"
+                    value={startTime}
+                    onChange={(event) => setStartTime(event.target.value)}
+                  />
+                </label>
+                <label className="time-field">
+                  <span>End</span>
+                  <input
+                    className="time-input"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="MM:SS"
+                    aria-label="Clip end time"
+                    value={endTime}
+                    onChange={(event) => setEndTime(event.target.value)}
+                  />
+                </label>
+                <span className="clip-hint">Optional · MM:SS or HH:MM:SS</span>
+              </div>
+            )}
+            {isPlaylist && (
+              <>
+                <div className="plist" role="group" aria-label="Playlist entries">
+                  {entries.map((entry) => {
+                    const meta = [
+                      formatDuration(entry.duration),
+                      entry.platform,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <label className="pitem" key={entry.url}>
+                        <input
+                          type="checkbox"
+                          aria-label={entry.title || "Untitled"}
+                          checked={selectedUrls.has(entry.url)}
+                          onChange={() => toggleEntry(entry.url)}
+                        />
+                        <span className="ptitle">{entry.title || "Untitled"}</span>
+                        {meta && <span className="pmeta">{meta}</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="plist-actions">
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() =>
+                      setSelectedUrls(new Set(entries.map((entry) => entry.url)))
+                    }
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => setSelectedUrls(new Set())}
+                  >
+                    Select none
+                  </button>
+                  <span className="plist-count" aria-live="polite">
+                    Selected {selectedEntries.length}/{entries.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn p"
+                    onClick={() =>
+                      onEnqueueSelected?.(selectedEntries, {
+                        preset: preset || undefined,
+                      })
+                    }
+                    disabled={selectedEntries.length === 0 || enqueueing}
+                    aria-busy={enqueueing || undefined}
+                  >
+                    <Icon name="dl" />
+                    {enqueueing
+                      ? "Enqueueing…"
+                      : `Enqueue Selected (${selectedEntries.length})`}
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -279,32 +371,34 @@ export function PreviewCard({
       <div className="foot">
         <Icon name="f" />
         <span className="save">Save to {saveFolder}</span>
-        <button
-          type="button"
-          className={`btn p ${downloading ? "" : "ready"}`}
-          id="go"
-          onClick={() =>
-            onDownload(
-              isImagePost
-                ? undefined
-                : {
-                    startTime: startTime.trim() || undefined,
-                    endTime: endTime.trim() || undefined,
-                    preset: preset || undefined,
-                  }
-            )
-          }
-          disabled={downloading}
-        >
-          <Icon name="dl" />
-          {downloading
-            ? "Starting…"
-            : isImagePost
-              ? images.length > 1
-                ? "Download photos"
-                : "Download photo"
-              : "Download"}
-        </button>
+        {!isPlaylist && (
+          <button
+            type="button"
+            className={`btn p ${downloading ? "" : "ready"}`}
+            id="go"
+            onClick={() =>
+              onDownload(
+                isImagePost
+                  ? undefined
+                  : {
+                      startTime: startTime.trim() || undefined,
+                      endTime: endTime.trim() || undefined,
+                      preset: preset || undefined,
+                    }
+              )
+            }
+            disabled={downloading}
+          >
+            <Icon name="dl" />
+            {downloading
+              ? "Starting…"
+              : isImagePost
+                ? images.length > 1
+                  ? "Download photos"
+                  : "Download photo"
+                : "Download"}
+          </button>
+        )}
       </div>
     </div>
   );

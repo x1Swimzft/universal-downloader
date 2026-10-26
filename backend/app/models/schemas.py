@@ -54,6 +54,15 @@ class FormatOption(BaseModel):
     note: Optional[str] = None
 
 
+class PreviewEntry(BaseModel):
+    url: str
+    title: str = "Untitled"
+    duration: Optional[Union[int, float]] = None
+    thumbnail: Optional[str] = None
+    platform: Optional[str] = None
+    media_type: str = "video"
+
+
 class MediaInfo(BaseModel):
     title: str
     thumbnail: Optional[str] = None
@@ -62,7 +71,8 @@ class MediaInfo(BaseModel):
     platform: Optional[str] = None
     formats: List[FormatOption] = []
     images: List[str] = []
-    media_type: str = "video"  # video | image | carousel
+    entries: List[PreviewEntry] = []
+    media_type: str = "video"  # video | image | carousel | playlist
 
 
 class DownloadResponse(BaseModel):

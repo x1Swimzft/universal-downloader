@@ -3,7 +3,7 @@ import asyncio
 import os
 import re
 import shutil
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from urllib.parse import quote
 import httpx
@@ -15,6 +15,7 @@ from app.models.schemas import (
     InfoRequest,
     DownloadRequest,
     MediaInfo,
+    PreviewEntry,
     DownloadResponse,
     JobStatus,
     DownloadFormat,
@@ -22,6 +23,9 @@ from app.models.schemas import (
 )
 from app.services.extractor import (
     extract_info,
+    inspect_entries,
+    _friendly_error,
+    diagnostic_message,
     download_media,
     get_direct_stream_url,
     validate_url_not_private,
@@ -45,6 +49,10 @@ _jobs: Dict[str, Any] = {}
 queue_mgr.external_task_store = _jobs
 
 TMP_DIR = os.environ.get("TMP_DIR", os.path.join(os.path.dirname(__file__), "../../tmp"))
+
+
+class PreviewRequest(BaseModel):
+    urls: List[str]
 
 
 class QueueAddRequest(ClipOptions):
@@ -104,6 +112,55 @@ async def get_info(body: InfoRequest):
     except Exception as e:
         clean_err = _strip_ansi(str(e))
         raise HTTPException(status_code=400, detail=clean_err)
+
+
+@router.post("/preview")
+async def preview_urls(body: PreviewRequest):
+    """Flat-inspect up to 10 links and return a deduplicated preview list."""
+    if len(body.urls) > 10:
+        raise HTTPException(status_code=400, detail="Up to 10 links can be previewed at once")
+
+    urls: List[str] = []
+    for raw_url in body.urls:
+        clean = raw_url.strip()
+        if not validate_url_not_private(clean):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid or private URL not allowed: {clean}",
+            )
+        if clean not in urls:
+            urls.append(clean)
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    results = await asyncio.gather(
+        *(inspect_entries(url) for url in urls), return_exceptions=True
+    )
+
+    items: List[PreviewEntry] = []
+    seen: set[str] = set()
+    failed: List[str] = []
+    errors: List[str] = []
+    for url, result in zip(urls, results):
+        if isinstance(result, BaseException):
+            failed.append(url)
+            friendly = _friendly_error(str(result), url)
+            errors.append(friendly or diagnostic_message(str(result), url)[1])
+            continue
+        for entry in result:
+            if entry["url"] in seen or len(items) >= 100:
+                continue
+            seen.add(entry["url"])
+            items.append(PreviewEntry(**entry))
+
+    if not items:
+        detail = " · ".join(dict.fromkeys(errors)) or "Could not inspect any link"
+        raise HTTPException(status_code=400, detail=detail)
+
+    response: Dict[str, Any] = {"items": items}
+    if failed:
+        response["failed"] = failed
+    return response
 
 
 def _safe_filename(title: str, ext: str) -> str:

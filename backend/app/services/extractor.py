@@ -36,7 +36,7 @@ if (USER_EXTRACTOR_DIR / "yt_dlp" / "__init__.py").is_file():
 import yt_dlp
 from yt_dlp.utils import download_range_func
 
-from app.models.schemas import MediaInfo, FormatOption
+from app.models.schemas import MediaInfo, FormatOption, PreviewEntry
 
 
 BROWSER_CHOICES = ("none", "chrome", "edge", "brave", "firefox")
@@ -455,6 +455,61 @@ def _collect_images(info: Dict[str, Any]) -> List[str]:
     return [thumb] if thumb else []
 
 
+def _collect_entries(info: Dict[str, Any], limit: int = 100) -> List[dict]:
+    """Flatten playlist entries into preview rows, rebuilding bare YouTube IDs."""
+    raw_entries = info.get("entries")
+    if not isinstance(raw_entries, list):
+        return []
+
+    parent_is_youtube = "youtube" in str(
+        info.get("extractor_key") or info.get("ie_key") or ""
+    ).lower()
+    entries: List[dict] = []
+    seen: set[str] = set()
+
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get("webpage_url") or entry.get("url")
+        if not isinstance(value, str) or not value.strip():
+            continue
+        url = value.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            entry_extractor = str(
+                entry.get("ie_key") or entry.get("extractor_key") or ""
+            ).lower()
+            if "youtube" in entry_extractor or parent_is_youtube:
+                url = f"https://www.youtube.com/watch?v={url}"
+            else:
+                continue
+        if not url.lower().startswith(("http://", "https://")) or url in seen:
+            continue
+        seen.add(url)
+
+        title = entry.get("title")
+        thumbnail = entry.get("thumbnail")
+        raw_duration = entry.get("duration")
+        entries.append(
+            {
+                "url": url,
+                "title": title if isinstance(title, str) and title.strip() else "Untitled",
+                "duration": raw_duration
+                if isinstance(raw_duration, (int, float))
+                and not isinstance(raw_duration, bool)
+                else None,
+                "thumbnail": thumbnail
+                if isinstance(thumbnail, str) and thumbnail
+                else _best_thumbnail_url(entry),
+                "platform": _extract_platform(url),
+                "media_type": "video",
+            }
+        )
+        if len(entries) >= limit:
+            break
+
+    return entries
+
+
 def _find_key(node: Any, key: str) -> Any:
     if isinstance(node, dict):
         if key in node:
@@ -566,10 +621,13 @@ async def extract_info(url: str) -> MediaInfo:
             )
 
     clean_url = _clean_url(url)
+    is_photo = _is_photo_url(url)
     ydl_opts = _get_base_opts(clean_url)
     ydl_opts["skip_download"] = True
-    ydl_opts["extract_flat"] = False
-    if _is_photo_url(url):
+    # Photo carousels need full entry metadata; video playlists stay flat.
+    ydl_opts["extract_flat"] = False if is_photo else "in_playlist"
+    ydl_opts["noplaylist"] = False
+    if is_photo:
         ydl_opts["ignore_no_formats_error"] = True
 
     loop = asyncio.get_event_loop()
@@ -589,7 +647,7 @@ async def extract_info(url: str) -> MediaInfo:
     if not isinstance(info, dict):
         raise ValueError("No media information found for this link")
 
-    images = _collect_images(info) if _is_photo_url(url) else []
+    images = _collect_images(info) if is_photo else []
     if images:
         return MediaInfo(
             title=info.get("title") or "Photo post",
@@ -599,6 +657,26 @@ async def extract_info(url: str) -> MediaInfo:
             images=images,
             media_type="carousel" if len(images) > 1 else "image",
         )
+
+    if info.get("_type") == "playlist" and not is_photo:
+        entries = _collect_entries(info)
+        if entries:
+            raw_duration = info.get("duration")
+            return MediaInfo(
+                title=info.get("title") or "Playlist",
+                thumbnail=_best_thumbnail_url(info),
+                duration=round(raw_duration)
+                if isinstance(raw_duration, (int, float))
+                else None,
+                uploader=info.get("uploader")
+                or info.get("channel")
+                or info.get("creator"),
+                platform=_extract_platform(clean_url),
+                entries=[PreviewEntry(**entry) for entry in entries],
+                formats=[],
+                images=[],
+                media_type="playlist",
+            )
 
     formats: list[FormatOption] = []
     seen_resolutions: set[str] = set()
@@ -645,6 +723,53 @@ async def extract_info(url: str) -> MediaInfo:
         formats=formats,
         media_type="video",
     )
+
+
+def _flat_info(clean_url: str) -> Optional[Dict[str, Any]]:
+    opts = _get_base_opts(clean_url)
+    opts.update(
+        {
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "noplaylist": False,
+        }
+    )
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(clean_url, download=False)
+
+
+def _single_entry(info: Dict[str, Any], fallback_url: str) -> dict:
+    title = info.get("title")
+    raw_duration = info.get("duration")
+    url = info.get("webpage_url")
+    if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+        url = fallback_url
+    return {
+        "url": url,
+        "title": title if isinstance(title, str) and title.strip() else "Untitled",
+        "duration": raw_duration
+        if isinstance(raw_duration, (int, float)) and not isinstance(raw_duration, bool)
+        else None,
+        "thumbnail": _best_thumbnail_url(info),
+        "platform": _extract_platform(url),
+        "media_type": "video",
+    }
+
+
+async def inspect_entries(url: str) -> List[dict]:
+    """Flat playlist inspection: expanded entries, or one item for a single URL."""
+    if not validate_url_not_private(url):
+        raise ValueError("Invalid or private URL not allowed")
+    clean_url = _clean_url(url)
+    info = await asyncio.get_running_loop().run_in_executor(None, _flat_info, clean_url)
+    if not isinstance(info, dict):
+        raise ValueError("No media information found for this link")
+    entries = _collect_entries(info)
+    if entries:
+        return entries
+    if info.get("_type") == "playlist":
+        raise ValueError("This playlist has no downloadable entries")
+    return [_single_entry(info, clean_url)]
 
 
 def _build_ydl_opts(

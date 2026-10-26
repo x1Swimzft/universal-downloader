@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import { Icon } from "./Icons";
 
 const PLATFORMS = [
@@ -29,11 +29,31 @@ export function UrlBar({
   detectedPlatform,
   error,
 }: UrlBarProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
       onFetch();
     }
+  };
+
+  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text");
+    // Single-line pastes keep native input behaviour; lists are flattened in place.
+    if (!/[\r\n\t]/.test(text)) return;
+    e.preventDefault();
+    const input = e.currentTarget;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    const collapsed = text.replace(/[\r\n\t]+/g, " ").trim();
+    onChange(
+      input.value.slice(0, start) + collapsed + input.value.slice(end)
+    );
+    const caret = start + collapsed.length;
+    requestAnimationFrame(() => {
+      inputRef.current?.setSelectionRange(caret, caret);
+    });
   };
 
   return (
@@ -43,12 +63,14 @@ export function UrlBar({
           <Icon name="dl" />
           <span hidden>Video or audio URL</span>
           <input
+            ref={inputRef}
             id="url"
-            placeholder="Paste a video or audio link…"
+            placeholder="Paste one or more links…"
             autoComplete="off"
             value={url}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handleInputPaste}
           />
         </label>
         <button

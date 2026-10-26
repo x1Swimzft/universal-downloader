@@ -37,6 +37,15 @@ export interface FormatOption {
   note?: string;
 }
 
+export interface PreviewEntry {
+  url: string;
+  title: string;
+  duration?: number;
+  thumbnail?: string;
+  platform?: string;
+  media_type: string;
+}
+
 export interface MediaInfo {
   title: string;
   thumbnail?: string;
@@ -45,7 +54,8 @@ export interface MediaInfo {
   platform?: string;
   formats: FormatOption[];
   images?: string[];
-  media_type?: "video" | "image" | "carousel";
+  entries?: PreviewEntry[];
+  media_type: "video" | "image" | "carousel" | "playlist";
 }
 
 export interface JobStatus {
@@ -160,6 +170,22 @@ export async function fetchInfo(url: string): Promise<MediaInfo> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to fetch info");
+  }
+  return res.json();
+}
+
+export async function previewUrls(
+  urls: string[]
+): Promise<{ items: PreviewEntry[]; failed?: string[] }> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${getApiBase()}/api/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ urls }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to preview links");
   }
   return res.json();
 }

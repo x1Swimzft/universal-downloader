@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   fetchInfo,
+  previewUrls,
   enqueueDownload,
   cancelQueueItem,
   pauseQueueItem,
@@ -19,6 +20,7 @@ import {
   openSaveFolder,
   triggerDesktopNotification,
   MediaInfo,
+  PreviewEntry,
   QueueItem,
   DownloadFormat,
   AppSettings,
@@ -54,6 +56,17 @@ const PLATFORM_PATTERNS: Array<[string, RegExp]> = [
 function detectPlatformName(url: string): string {
   const found = PLATFORM_PATTERNS.find(([, re]) => re.test(url));
   return found ? found[0] : "";
+}
+
+function parseUrls(value: string): string[] {
+  const urls: string[] = [];
+  for (const part of value.split(/\s+/)) {
+    const candidate = part.trim();
+    if (/^https?:\/\//i.test(candidate) && !urls.includes(candidate)) {
+      urls.push(candidate);
+    }
+  }
+  return urls;
 }
 
 function PreviewSkeleton() {
@@ -225,38 +238,60 @@ export default function Home() {
 
   const handleFetchInfo = useCallback(
     async (overrideUrl?: string) => {
-      const targetUrl = (overrideUrl !== undefined ? overrideUrl : url).trim();
+      const urls = parseUrls(overrideUrl !== undefined ? overrideUrl : url);
       setInfo(null);
-      if (!/^https?:\/\/\S+\.\S+/i.test(targetUrl)) {
+      if (urls.length === 0) {
         setErrorMsg(
           "That doesn't look like a link. Paste a full URL starting with https://"
         );
         return;
       }
       setErrorMsg("");
-      const plat = detectPlatformName(targetUrl);
-      setDetectedPlatform(plat);
+      const singlePlatform =
+        urls.length === 1 ? detectPlatformName(urls[0]) : "";
+      setDetectedPlatform(singlePlatform);
       setLoadingInfo(true);
       try {
-        const media = await fetchInfo(targetUrl);
-        setInfo(media);
-        if (!plat && media.platform) {
-          setDetectedPlatform(media.platform);
-        }
-        const isImagePost =
-          media.media_type === "image" || media.media_type === "carousel";
-        const hasVideo = media.formats?.some(
-          (f) => f.resolution && f.resolution !== "audio"
-        );
-        if (isImagePost) {
-          setMode("Video");
-          setSelectedOption("1080p");
-        } else if (!hasVideo || media.platform === "soundcloud") {
-          setMode("Audio");
-          setSelectedOption("MP3 320k");
+        if (urls.length === 1) {
+          const media = await fetchInfo(urls[0]);
+          setInfo(media);
+          if (!singlePlatform && media.platform) {
+            setDetectedPlatform(media.platform);
+          }
+          const isImagePost =
+            media.media_type === "image" || media.media_type === "carousel";
+          const isPlaylist = Boolean(media.entries?.length);
+          const hasVideo = media.formats?.some(
+            (f) => f.resolution && f.resolution !== "audio"
+          );
+          if (isPlaylist || isImagePost) {
+            setMode("Video");
+            setSelectedOption("1080p");
+          } else if (!hasVideo || media.platform === "soundcloud") {
+            setMode("Audio");
+            setSelectedOption("MP3 320k");
+          } else {
+            setMode("Video");
+            setSelectedOption("1080p");
+          }
         } else {
+          const preview = await previewUrls(urls);
+          setInfo({
+            title: `${urls.length} links`,
+            media_type: "playlist",
+            platform: "Multiple",
+            entries: preview.items,
+            formats: [],
+          });
           setMode("Video");
           setSelectedOption("1080p");
+          if (preview.failed?.length) {
+            setErrorMsg(
+              `Skipped ${preview.failed.length} link${
+                preview.failed.length === 1 ? "" : "s"
+              } that could not be inspected.`
+            );
+          }
         }
       } catch (e: unknown) {
         setErrorMsg(e instanceof Error ? e.message : "Failed to fetch link info");
@@ -325,6 +360,34 @@ export default function Home() {
       setActiveView("q");
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : "Failed to start download");
+    } finally {
+      setStartingDownload(false);
+    }
+  };
+
+  const handleEnqueueSelected = async (
+    entries: PreviewEntry[],
+    choices?: DownloadChoices
+  ) => {
+    if (entries.length === 0) return;
+    setStartingDownload(true);
+    setErrorMsg("");
+    try {
+      const { format, quality } = mapSelectionToFormatQuality(
+        mode,
+        selectedOption
+      );
+      for (const entry of entries) {
+        await enqueueDownload(entry.url, format, quality, entry.title, {
+          ...choices,
+          socialBypass: settings.socialBypass,
+        });
+      }
+      setActiveView("q");
+    } catch (e: unknown) {
+      setErrorMsg(
+        e instanceof Error ? e.message : "Failed to enqueue selected links"
+      );
     } finally {
       setStartingDownload(false);
     }
@@ -550,6 +613,8 @@ export default function Home() {
                     saveFolder={settings.saveFolder}
                     onDownload={handleStartDownload}
                     downloading={startingDownload}
+                    onEnqueueSelected={handleEnqueueSelected}
+                    enqueueing={startingDownload}
                   />
                 )}
               </div>
