@@ -26,6 +26,7 @@ from app.services.extractor import (
     _instagram_embed_info,
     _instagram_shortcode,
     _music_ffmpeg_args,
+    _normalize_preset,
     _parse_tiktok_photo_html,
     _photo_referer,
     _preset_ffmpeg_args,
@@ -451,6 +452,49 @@ class TestMusicDownload(unittest.IsolatedAsyncioTestCase):
         postprocessor = _FakeYoutubeDL.last_opts["postprocessors"][0]
         self.assertEqual(postprocessor["key"], "FFmpegExtractAudio")
         self.assertEqual(postprocessor["preferredcodec"], "mp3")
+
+    async def test_social_bypass_does_not_convert_audio_to_mp4(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_id = "spotify-social"
+            audio_path = os.path.join(tmp, f"{job_id}.mp3")
+            with open(audio_path, "wb") as handle:
+                handle.write(b"x")
+
+            postprocess = MagicMock()
+            with patch.object(
+                extractor.yt_dlp, "YoutubeDL", _FakeYoutubeDL
+            ), patch.object(
+                extractor, "_postprocess_file", postprocess
+            ), patch.object(
+                extractor, "_download_music_cover", AsyncMock(return_value=None)
+            ), patch.object(
+                extractor, "_embed_music_metadata", side_effect=lambda path, meta, cover: path
+            ):
+                filepath, _ = await download_media(
+                    "https://open.spotify.com/track/abc",
+                    "mp3",
+                    "320",
+                    tmp,
+                    {},
+                    job_id,
+                    search_query="Artist - Song official audio",
+                    social_bypass=True,
+                )
+
+        self.assertEqual(filepath, audio_path)
+        self.assertTrue(filepath.endswith(".mp3"))
+        postprocess.assert_not_called()
+
+    def test_audio_preset_normalization_ignores_social_bypass(self):
+        self.assertIsNone(_normalize_preset(None, True, audio=True))
+        self.assertEqual(
+            _normalize_preset("audio_lossless", True, audio=True),
+            "audio_lossless",
+        )
+        self.assertEqual(_normalize_preset(None, True, audio=False), "social_bypass")
+        self.assertEqual(
+            _normalize_preset("edit_ready", True, audio=False), "social_bypass"
+        )
 
     async def test_music_track_url_resolves_to_search_not_raw_url(self):
         resolved = {

@@ -57,6 +57,16 @@ const PRESET_OPTIONS: SegmentOption[] = [
   { value: "audio_lossless", label: "Lossless" },
 ];
 
+const AUDIO_PRESET_OPTIONS: SegmentOption[] = [
+  { value: "", label: "Off" },
+  { value: "audio_norm", label: "Normalize" },
+  { value: "audio_lossless", label: "Lossless" },
+];
+
+const MUSIC_MODE_OPTIONS: SegmentOption[] = [
+  { value: "Audio", label: "Audio" },
+];
+
 function Segmented({
   label,
   options,
@@ -164,18 +174,25 @@ export function PreviewCard({
         (f.note || "").toLowerCase().startsWith("audio")
     )
   );
-  // Photo posts have no Video tab; without background audio "Images" is the only mode.
+  const isMusic = /spotify|apple/i.test(info.platform || "");
+  // Music links never offer Video. Photo posts never offer Video.
   const effectiveMode: DownloadMode = isImagePost
     ? mode === "Video" || !hasBackgroundAudio
       ? "Images"
       : mode
-    : mode === "Images"
-      ? "Video"
-      : mode;
+    : isMusic
+      ? "Audio"
+      : mode === "Images"
+        ? "Video"
+        : mode;
 
   useEffect(() => {
     if (mode !== effectiveMode) onModeChange(effectiveMode);
   }, [effectiveMode, mode, onModeChange]);
+
+  useEffect(() => {
+    setPreset("");
+  }, [effectiveMode]);
 
   useEffect(() => {
     setPreset("");
@@ -239,6 +256,9 @@ export function PreviewCard({
     },
     ...(hasBackgroundAudio ? [{ value: "Audio", label: "Audio" }] : []),
   ];
+  const modeOptions = isMusic ? MUSIC_MODE_OPTIONS : MODE_OPTIONS;
+  const presetOptions =
+    effectiveMode === "Audio" ? AUDIO_PRESET_OPTIONS : PRESET_OPTIONS;
   const thumb = info.thumbnail || images[0];
   const downloadLabel = isImagePost
     ? effectiveMode === "Images"
@@ -246,7 +266,9 @@ export function PreviewCard({
         ? "Download photos"
         : "Download photo"
       : "Download audio"
-    : "Download";
+    : isMusic
+      ? "Download audio"
+      : "Download";
 
   return (
     <div className="res show" id="res">
@@ -319,7 +341,7 @@ export function PreviewCard({
                 <Segmented
                   label="Edit preset"
                   className="preset"
-                  options={PRESET_OPTIONS}
+                  options={AUDIO_PRESET_OPTIONS}
                   value={preset}
                   onChange={setPreset}
                 />
@@ -331,8 +353,8 @@ export function PreviewCard({
             <Segmented
               label="Media type"
               className="mode"
-              options={MODE_OPTIONS}
-              value={mode}
+              options={modeOptions}
+              value={effectiveMode}
               onChange={(value) => onModeChange(value as DownloadMode)}
             />
             <Segmented
@@ -345,7 +367,7 @@ export function PreviewCard({
             <Segmented
               label="Edit preset"
               className="preset"
-              options={PRESET_OPTIONS}
+              options={presetOptions}
               value={preset}
               onChange={setPreset}
             />

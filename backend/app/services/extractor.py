@@ -199,8 +199,14 @@ def validate_clip_range(
     return start, end
 
 
-def _normalize_preset(preset: Optional[str], social_bypass: bool = False) -> Optional[str]:
-    if social_bypass:
+def _normalize_preset(
+    preset: Optional[str],
+    social_bypass: bool = False,
+    audio: bool = False,
+) -> Optional[str]:
+    # Social bypass is a video container/encoder preset. It must never
+    # override an audio download and turn it into an .mp4.
+    if social_bypass and not audio:
         return "social_bypass"
     if preset in (None, "", "none"):
         return None
@@ -2198,15 +2204,24 @@ def _image_extension(url: str, content_type: str) -> str:
     return ".jpg" if suffix == ".jpeg" else suffix if suffix in (".jpg", ".png", ".webp") else ".jpg"
 
 
-def _find_output_file(tmp_dir: str, job_id: str) -> str:
+def _find_output_file(
+    tmp_dir: str, job_id: str, preferred_ext: Optional[str] = None
+) -> str:
     cover_prefix = f"{job_id}.cover."
-    for name in os.listdir(tmp_dir):
-        if (
-            name.startswith(job_id)
-            and not name.startswith(cover_prefix)
-            and not name.endswith((".part", ".ytdl"))
-        ):
-            return os.path.join(tmp_dir, name)
+    candidates = [
+        name
+        for name in os.listdir(tmp_dir)
+        if name.startswith(job_id)
+        and not name.startswith(cover_prefix)
+        and not name.endswith((".part", ".ytdl"))
+    ]
+    if preferred_ext:
+        suffix = f".{preferred_ext.lower()}"
+        for name in candidates:
+            if name.lower().endswith(suffix):
+                return os.path.join(tmp_dir, name)
+    if candidates:
+        return os.path.join(tmp_dir, candidates[0])
     raise FileNotFoundError(f"Output file not found for job {job_id}")
 
 
@@ -2448,7 +2463,14 @@ async def download_media(
 
     clean_url = _clean_url(url)
     start, end = validate_clip_range(start_time, end_time)
-    preset_name = _normalize_preset(preset, social_bypass)
+    audio_requested = (
+        fmt in ("mp3", "m4a", "opus")
+        or is_music_url(url)
+        or bool(search_query)
+    )
+    preset_name = _normalize_preset(preset, social_bypass, audio=audio_requested)
+    if audio_requested and preset_name in ("edit_ready", "social_bypass"):
+        preset_name = None
 
     is_tiktok_photo = "tiktok.com" in url.lower() and "/photo/" in url.lower()
     # Images, and legacy video/default requests, use the photo ZIP path.
@@ -2507,7 +2529,11 @@ async def download_media(
     if cancel_event and cancel_event.is_set():
         raise yt_dlp.utils.DownloadError("Cancelled by user")
 
-    filepath = _find_output_file(tmp_dir, job_id)
+    filepath = _find_output_file(
+        tmp_dir,
+        job_id,
+        download_fmt if download_fmt in ("mp3", "m4a", "opus") else None,
+    )
     if preset_name:
         filepath = await loop.run_in_executor(None, _postprocess_file, filepath, preset_name)
 
