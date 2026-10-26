@@ -14,8 +14,74 @@ export interface PreviewCardProps {
   downloading?: boolean;
 }
 
-const VIDEO_OPTIONS = ["2160p", "1440p", "1080p", "720p", "480p"] as const;
-const AUDIO_OPTIONS = ["MP3 320k", "M4A", "OPUS"] as const;
+interface SegmentOption {
+  value: string;
+  label: string;
+}
+
+const MODE_OPTIONS: SegmentOption[] = [
+  { value: "Video", label: "Video" },
+  { value: "Audio", label: "Audio" },
+];
+
+const VIDEO_OPTIONS: SegmentOption[] = [
+  { value: "2160p", label: "4K" },
+  { value: "1440p", label: "1440p" },
+  { value: "1080p", label: "1080p" },
+  { value: "720p", label: "720p" },
+  { value: "480p", label: "480p" },
+];
+
+const AUDIO_OPTIONS: SegmentOption[] = [
+  { value: "MP3 320k", label: "MP3 320k" },
+  { value: "M4A", label: "M4A" },
+  { value: "OPUS", label: "OPUS" },
+];
+
+function Segmented({
+  label,
+  options,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  options: SegmentOption[];
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const index = Math.max(
+    0,
+    options.findIndex((option) => option.value === value)
+  );
+  const style = {
+    "--seg-count": options.length,
+    "--seg-index": index,
+  } as React.CSSProperties;
+
+  return (
+    <div
+      className={`segmented ${className || ""}`}
+      role="group"
+      aria-label={label}
+      style={style}
+    >
+      <span className="seg-thumb" aria-hidden="true" />
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={option.value === value}
+          className="seg-opt"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function formatDuration(sec?: number): string {
   if (sec == null || isNaN(sec) || sec <= 0) return "";
@@ -74,70 +140,51 @@ export function PreviewCard({
 
   return (
     <div className="res show" id="res">
-      <div className="thumb" style={{ position: "relative", overflow: "hidden" }}>
+      <div className="thumb">
         {info.thumbnail ? (
           <Image
             src={info.thumbnail}
             alt={info.title || "Thumbnail"}
             fill
             unoptimized
-            style={{
-              objectFit: "cover",
-              borderRadius: "12px",
-            }}
+            style={{ objectFit: "cover" }}
           />
         ) : (
-          <Icon name="p" style={{ width: 36, height: 36, fill: "#fff" }} />
+          <Icon name="p" />
         )}
+        {dur && <span className="thumb-dur">{dur}</span>}
       </div>
 
       <div className="info">
         <h3 id="rt">{info.title}</h3>
-        {metaText && (
+        {(metaText || info.platform) && (
           <div className="meta" id="rm">
-            {metaText}
+            {info.platform && <span className="chip">{info.platform}</span>}
+            {metaText && <span>{metaText}</span>}
           </div>
         )}
-        <div className="seg" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "Video"}
-            className={mode === "Video" ? "on" : ""}
-            onClick={() => onModeChange("Video")}
-          >
-            Video
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "Audio"}
-            className={mode === "Audio" ? "on" : ""}
-            onClick={() => onModeChange("Audio")}
-          >
-            Audio
-          </button>
-        </div>
-        <div className="chips" id="qs" style={{ marginTop: 0 }}>
-          {currentOptions.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className={`chip ${opt === selectedOption ? "on" : ""}`}
-              onClick={() => onSelectOption(opt)}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Media type"
+          className="mode"
+          options={MODE_OPTIONS}
+          value={mode}
+          onChange={(value) => onModeChange(value as "Video" | "Audio")}
+        />
+        <Segmented
+          label="Quality"
+          className="quality"
+          options={currentOptions}
+          value={selectedOption}
+          onChange={onSelectOption}
+        />
       </div>
 
-      <div className="foot" style={{ width: "100%" }}>
+      <div className="foot">
         <Icon name="f" />
-        <span>Save to {saveFolder}</span>
+        <span className="save">Save to {saveFolder}</span>
         <button
           type="button"
-          className="btn p"
+          className={`btn p ${downloading ? "" : "ready"}`}
           id="go"
           onClick={onDownload}
           disabled={downloading}

@@ -88,7 +88,20 @@ export function UrlBar({
       </div>
 
       <div className="err" id="err" role="alert">
-        {error}
+        {error && (
+          <div className="err-box">
+            <Icon name="x" />
+            <span>{error}</span>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => onFetch()}
+              disabled={loading}
+            >
+              Retry
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

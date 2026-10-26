@@ -480,7 +480,7 @@ app.whenReady().then(async () => {
     title: "Universal Downloader",
     icon: APP_ICON_PATH,
     autoHideMenuBar: true,
-    backgroundColor: "#060912",
+    backgroundColor: "#0a0a0f",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,

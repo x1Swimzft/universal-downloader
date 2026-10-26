@@ -24,6 +24,7 @@ import { PreviewCard } from "@/components/PreviewCard";
 import { DownloadCard } from "@/components/DownloadCard";
 import { HistoryView } from "@/components/HistoryView";
 import { SettingsView } from "@/components/SettingsView";
+import { Switch } from "@/components/Switch";
 
 const HISTORY_STORAGE_KEY = "ud_history_v1";
 
@@ -39,6 +40,19 @@ const PLATFORM_PATTERNS: Array<[string, RegExp]> = [
 function detectPlatformName(url: string): string {
   const found = PLATFORM_PATTERNS.find(([, re]) => re.test(url));
   return found ? found[0] : "";
+}
+
+function PreviewSkeleton() {
+  return (
+    <div className="sk" role="status" aria-label="Loading preview">
+      <div className="sk-thumb" />
+      <div className="sk-body">
+        <div className="sk-line w80" />
+        <div className="sk-line w40" />
+        <div className="sk-line w60" />
+      </div>
+    </div>
+  );
 }
 
 function mapSelectionToFormatQuality(
@@ -317,7 +331,7 @@ export default function Home() {
           onSelectView={setActiveView}
           activeQueueCount={activeQueueCount}
           onToggleTheme={handleToggleTheme}
-          versionText="v0.2.0 · Pro"
+          versionText="v0.3.0 · Pro"
         />
 
         <main>
@@ -327,13 +341,16 @@ export default function Home() {
               className={`v ${activeView === "dl" ? "show" : ""}`}
               id="v-dl"
             >
-              <h1>
-                Paste a link. <span>Get the file.</span>
-              </h1>
-              <p className="sub">
-                One place for every video and audio link - fast, private, and on
-                your own PC.
-              </p>
+              <div className="page-head">
+                <div className="cap">Download</div>
+                <h1>
+                  Paste a link. <span>Get the file.</span>
+                </h1>
+                <p className="sub">
+                  One place for every video and audio link - fast, private, and on
+                  your own PC.
+                </p>
+              </div>
 
               <div className="card">
                 <UrlBar
@@ -345,6 +362,26 @@ export default function Home() {
                   detectedPlatform={detectedPlatform}
                   error={errorMsg}
                 />
+
+                <div className="watch">
+                  <div>
+                    <span className="watch-label">Clipboard watch</span>
+                    <span className="watch-status">
+                      {settings.autoDetectClipboard
+                        ? "On · copied links are detected"
+                        : "Off · paste a link manually"}
+                    </span>
+                  </div>
+                  <Switch
+                    checked={settings.autoDetectClipboard}
+                    onChange={(val) =>
+                      handleUpdateSettings({ autoDetectClipboard: val })
+                    }
+                    ariaLabel="Auto-detect copied links"
+                  />
+                </div>
+
+                {loadingInfo && !info && <PreviewSkeleton />}
 
                 {info && (
                   <PreviewCard
@@ -371,22 +408,25 @@ export default function Home() {
               className={`v ${activeView === "q" ? "show" : ""}`}
               id="v-q"
             >
-              <h2>Queue</h2>
-              <div id="ql">
-                {queueItems.length === 0 ? (
-                  <div className="empty">
-                    Nothing downloading. Paste a link to start.
-                  </div>
-                ) : (
-                  queueItems.map((item) => (
+              <div className="page-head">
+                <div className="cap">Queue</div>
+                <h2>Active downloads</h2>
+              </div>
+              {queueItems.length === 0 ? (
+                <div className="empty">
+                  Nothing downloading. Paste a link to start.
+                </div>
+              ) : (
+                <div className="group" id="ql">
+                  {queueItems.map((item) => (
                     <DownloadCard
                       key={item.id}
                       item={item}
                       onCancel={handleCancelQueueItem}
                     />
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             {/* History View */}

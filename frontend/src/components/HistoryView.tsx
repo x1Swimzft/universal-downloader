@@ -15,53 +15,49 @@ export function HistoryView({
 }: HistoryViewProps) {
   return (
     <>
-      <h2>History</h2>
-      <div id="hl">
-        {items.length === 0 ? (
-          <div className="empty">Finished downloads will show up here.</div>
-        ) : (
-          items.map((item) => (
-            <div key={`${item.id}-${item.completedAt}`} className="card dl">
-              <div
-                className="t"
-                style={{ alignItems: "center", flexWrap: "wrap" }}
-              >
-                <span>{item.title}</span>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
+      <div className="page-head">
+        <div className="cap">Library</div>
+        <h2>History</h2>
+      </div>
+      {items.length === 0 ? (
+        <div className="empty">Finished downloads will show up here.</div>
+      ) : (
+        <div className="group" id="hl">
+          {items.map((item) => (
+            <div key={`${item.id}-${item.completedAt}`} className="hrow">
+              <div className="hmain">
+                <span className="htitle" title={item.title}>
+                  {item.title}
+                </span>
+                <span className="hmeta">
+                  {item.label}
+                  {item.platform ? ` · ${item.platform}` : ""}
+                </span>
+              </div>
+              <div className="hactions">
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={() => onOpenFolder(item.filename)}
+                  aria-label={`Open folder for ${item.title}`}
                 >
-                  <span className="meta" style={{ margin: 0 }}>
-                    {item.label}
-                  </span>
-                  <button
-                    type="button"
-                    className="chip"
-                    onClick={() => onOpenFolder(item.filename)}
-                    aria-label={`Open folder for ${item.title}`}
-                  >
-                    <Icon name="f" />
-                    Open folder
-                  </button>
-                  <button
-                    type="button"
-                    className="chip"
-                    onClick={() => onRedownload(item)}
-                    aria-label={`Download ${item.title} again`}
-                  >
-                    <Icon name="r" />
-                    Download again
-                  </button>
-                </div>
+                  <Icon name="f" />
+                  Open folder
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={() => onRedownload(item)}
+                  aria-label={`Download ${item.title} again`}
+                >
+                  <Icon name="r" />
+                  Download again
+                </button>
               </div>
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

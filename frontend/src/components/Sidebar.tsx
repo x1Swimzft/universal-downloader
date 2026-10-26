@@ -16,15 +16,15 @@ export function Sidebar({
   onSelectView,
   activeQueueCount,
   onToggleTheme,
-  versionText = "v0.2.0 · Pro",
+  versionText = "v0.3.0 · Pro",
 }: SidebarProps) {
   return (
     <aside className="side">
       <div className="brand">
-        <span className="l">
-          <img src="/icon.svg" alt="Universal Downloader Logo" width={34} height={34} />
+        <span className="brand-tile">
+          <Icon name="dl" />
         </span>
-        <div>
+        <div className="brand-name">
           Universal<em>Downloader</em>
         </div>
       </div>
@@ -87,8 +87,14 @@ export function Sidebar({
         Theme
       </button>
 
-      <div className="ver" id="ver">
-        {versionText}
+      <div className="side-foot">
+        <span className="status">
+          <i className="dot" aria-hidden="true" />
+          FFmpeg ready
+        </span>
+        <div className="ver" id="ver">
+          {versionText}
+        </div>
       </div>
     </aside>
   );

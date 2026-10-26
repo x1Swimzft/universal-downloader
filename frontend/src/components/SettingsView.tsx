@@ -16,8 +16,11 @@ export function SettingsView({
 }: SettingsViewProps) {
   return (
     <>
-      <h2>Settings</h2>
-      <div className="card">
+      <div className="page-head">
+        <div className="cap">Preferences</div>
+        <h2>Settings</h2>
+      </div>
+      <div className="group">
         <SettingRow
           title="Auto-detect copied links"
           subtitle="Watch the clipboard and offer to fetch"

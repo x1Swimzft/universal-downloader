@@ -42,6 +42,7 @@ from their upstream projects.
 | APScheduler | Background task scheduling | MIT |
 | certifi | SSL root certificates (shipped unmodified) | MPL-2.0 |
 | Next.js, React, Tailwind CSS | User interface | MIT |
+| Inter (variable) | UI typeface, bundled at `frontend/public/fonts/InterVariable.woff2` | SIL Open Font License 1.1 (https://github.com/rsms/inter) |
 
 certifi is distributed in binary form without modification under the Mozilla Public License 2.0 (MPL-2.0). Source code is available at https://github.com/certifi/python-certifi.
 
