@@ -224,7 +224,7 @@ The current release was checked with:
 - Packaged startup, installed startup, menu/shortcut, and updater IPC smoke tests
 - Live TikTok Photo Mode extraction, ZIP download, and background-audio MP3 download
 - Live public Instagram carousel fallback
-- 820×620 / 125% and 1920×1080 appearance checks
+- 820×620 / 125% responsive pass and a clean 1920×1080 UI capture
 
 ---
 
