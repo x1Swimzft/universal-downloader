@@ -8,17 +8,92 @@ import {
 } from "../lib/api";
 import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
+import {
+  AccentColor,
+  AppearanceSettings,
+  Density,
+  ThemeMode,
+} from "../lib/appearance";
 
 export interface SettingsViewProps {
   settings: AppSettings;
+  appearance: AppearanceSettings;
   onUpdate: (patch: Partial<AppSettings>) => void;
+  onUpdateAppearance: (patch: Partial<AppearanceSettings>) => void;
   onPickFolder: () => void;
   onPickCookiesFile: () => void;
 }
 
+interface SegmentOption {
+  value: string;
+  label: string;
+}
+
+const THEME_OPTIONS: SegmentOption[] = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "system", label: "System" },
+];
+
+const ACCENT_OPTIONS: Array<{ value: AccentColor; label: string }> = [
+  { value: "crimson", label: "Crimson" },
+  { value: "violet", label: "Violet" },
+  { value: "cyan", label: "Cyan" },
+  { value: "emerald", label: "Emerald" },
+  { value: "amber", label: "Amber" },
+];
+
+function Segmented({
+  label,
+  options,
+  value,
+  onChange,
+  wide,
+}: {
+  label: string;
+  options: SegmentOption[];
+  value: string;
+  onChange: (value: string) => void;
+  wide?: boolean;
+}) {
+  const index = Math.max(
+    0,
+    options.findIndex((option) => option.value === value)
+  );
+  const style = {
+    "--seg-count": options.length,
+    "--seg-index": index,
+    maxWidth: wide ? 300 : 230,
+  } as React.CSSProperties;
+
+  return (
+    <div
+      className="segmented appearance"
+      role="group"
+      aria-label={label}
+      style={style}
+    >
+      <span className="seg-thumb" aria-hidden="true" />
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={option.value === value}
+          className="seg-opt"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SettingsView({
   settings,
+  appearance,
   onUpdate,
+  onUpdateAppearance,
   onPickFolder,
   onPickCookiesFile,
 }: SettingsViewProps) {
@@ -74,6 +149,72 @@ export function SettingsView({
       <div className="page-head">
         <div className="cap">Preferences</div>
         <h2>Settings</h2>
+      </div>
+      <div className="group appearance-group" aria-label="Appearance">
+        <SettingRow
+          title="Theme"
+          subtitle="Dark, light, or follow the Windows setting"
+        >
+          <Segmented
+            label="Theme"
+            options={THEME_OPTIONS}
+            value={appearance.theme}
+            onChange={(theme) =>
+              onUpdateAppearance({ theme: theme as ThemeMode })
+            }
+            wide
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="Accent color"
+          subtitle="Buttons, navigation, focus rings, and progress"
+        >
+          <div className="swatches" role="group" aria-label="Accent color">
+            {ACCENT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="swatch"
+                data-accent={option.value}
+                aria-label={`${option.label} accent`}
+                aria-pressed={appearance.accent === option.value}
+                title={option.label}
+                onClick={() => onUpdateAppearance({ accent: option.value })}
+              >
+                <span className="swatch-dot" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          title="Compact history & queue rows"
+          subtitle="Fit more finished and active downloads on screen"
+        >
+          <Switch
+            checked={appearance.density === "compact"}
+            onChange={(compact) =>
+              onUpdateAppearance({
+                density: (compact ? "compact" : "comfortable") as Density,
+              })
+            }
+            ariaLabel="Compact history and queue rows"
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="Reduce glass blur & motion"
+          subtitle="Lower GPU use while streaming or gaming"
+        >
+          <Switch
+            checked={appearance.reduceEffects}
+            onChange={(reduceEffects) =>
+              onUpdateAppearance({ reduceEffects })
+            }
+            ariaLabel="Reduce glass blur and motion"
+          />
+        </SettingRow>
       </div>
       <div className="group">
         <SettingRow

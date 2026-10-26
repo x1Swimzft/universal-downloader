@@ -26,6 +26,13 @@ import { DownloadCard } from "@/components/DownloadCard";
 import { HistoryView } from "@/components/HistoryView";
 import { SettingsView } from "@/components/SettingsView";
 import { Switch } from "@/components/Switch";
+import {
+  AppearanceSettings,
+  APPEARANCE_STORAGE_KEY,
+  DEFAULT_APPEARANCE,
+  applyAppearance,
+  readAppearance,
+} from "@/lib/appearance";
 
 const HISTORY_STORAGE_KEY = "ud_history_v1";
 
@@ -90,6 +97,9 @@ export default function Home() {
 
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [appearance, setAppearance] =
+    useState<AppearanceSettings>(DEFAULT_APPEARANCE);
+  const [appearanceReady, setAppearanceReady] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
     autoDetectClipboard: true,
     minimizeToTray: true,
@@ -107,6 +117,24 @@ export default function Home() {
   const settingsRef = useRef<AppSettings>(settings);
   settingsRef.current = settings;
 
+  useEffect(() => {
+    setAppearance(readAppearance());
+    setAppearanceReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!appearanceReady) return;
+    applyAppearance(appearance);
+    try {
+      localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance));
+    } catch {}
+    if (appearance.theme !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncSystemTheme = () => applyAppearance(appearance);
+    media.addEventListener("change", syncSystemTheme);
+    return () => media.removeEventListener("change", syncSystemTheme);
+  }, [appearance, appearanceReady]);
+
   // Load history from localStorage, and settings from Electron IPC / backend
   useEffect(() => {
     try {
@@ -122,15 +150,11 @@ export default function Home() {
 
     getAppSettings().then((loaded) => {
       setSettings(loaded);
-      document.documentElement.dataset.theme = loaded.theme || "dark";
     });
 
     if (typeof window !== "undefined" && window.electronAPI) {
       return window.electronAPI.onSettingsUpdated((updated) => {
         setSettings(updated);
-        if (updated.theme) {
-          document.documentElement.dataset.theme = updated.theme;
-        }
       });
     }
   }, []);
@@ -328,11 +352,12 @@ export default function Home() {
   const handleUpdateSettings = async (patch: Partial<AppSettings>) => {
     const next = { ...settings, ...patch };
     setSettings(next);
-    if (patch.theme) {
-      document.documentElement.dataset.theme = patch.theme;
-    }
     const saved = await updateAppSettings(patch);
     setSettings(saved);
+  };
+
+  const handleUpdateAppearance = (patch: Partial<AppearanceSettings>) => {
+    setAppearance((current) => ({ ...current, ...patch }));
   };
 
   const handlePickFolder = async () => {
@@ -348,8 +373,10 @@ export default function Home() {
   const handleToggleTheme = () => {
     const currentTheme =
       document.documentElement.dataset.theme === "light" ? "light" : "dark";
-    const nextTheme = currentTheme === "dark" ? "light" : "dark";
-    handleUpdateSettings({ theme: nextTheme });
+    setAppearance((current) => ({
+      ...current,
+      theme: currentTheme === "dark" ? "light" : "dark",
+    }));
   };
 
   const activeQueueCount = queueItems.filter(
@@ -482,7 +509,9 @@ export default function Home() {
             >
               <SettingsView
                 settings={settings}
+                appearance={appearance}
                 onUpdate={handleUpdateSettings}
+                onUpdateAppearance={handleUpdateAppearance}
                 onPickFolder={handlePickFolder}
                 onPickCookiesFile={handlePickCookiesFile}
               />
