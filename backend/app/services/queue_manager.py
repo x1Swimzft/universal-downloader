@@ -116,6 +116,10 @@ class QueueItem:
     speed: float = 0.0
     filename: Optional[str] = None
     error: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    preset: Optional[str] = None
+    social_bypass: bool = False
 
 
 class QueueManager:
@@ -157,6 +161,10 @@ class QueueManager:
         fmt: str = "mp4",
         quality: str = "1080",
         title: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        preset: Optional[str] = None,
+        social_bypass: bool = False,
     ) -> str:
         job_id = str(uuid.uuid4())
         plat = _extract_platform(url).capitalize()
@@ -170,6 +178,10 @@ class QueueManager:
             status="queued",
             progress=0.0,
             speed=0.0,
+            start_time=start_time,
+            end_time=end_time,
+            preset=preset,
+            social_bypass=social_bypass,
         )
         self.items[job_id] = item
         self._cancel_events[job_id] = asyncio.Event()
@@ -232,7 +244,17 @@ class QueueManager:
         try:
             os.makedirs(TMP_DIR, exist_ok=True)
             filepath, extracted_title = await download_media(
-                item.url, item.format, item.quality, TMP_DIR, tmp_store, job_id, cancel_event=cancel_event
+                item.url,
+                item.format,
+                item.quality,
+                TMP_DIR,
+                tmp_store,
+                job_id,
+                cancel_event=cancel_event,
+                start_time=item.start_time,
+                end_time=item.end_time,
+                preset=item.preset,
+                social_bypass=item.social_bypass,
             )
             if cancel_event and cancel_event.is_set():
                 self._cleanup_tmp_files(job_id)

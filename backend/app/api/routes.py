@@ -18,13 +18,18 @@ from app.models.schemas import (
     DownloadResponse,
     JobStatus,
     DownloadFormat,
+    ClipOptions,
 )
 from app.services.extractor import (
     extract_info,
     download_media,
     get_direct_stream_url,
     validate_url_not_private,
+    validate_clip_range,
+    set_cookie_preferences,
+    get_cookie_preferences,
 )
+from app.services.extractor_update import get_extractor_status, update_extractor
 from app.services.queue_manager import (
     queue_mgr,
     is_allowed_path,
@@ -41,7 +46,7 @@ queue_mgr.external_task_store = _jobs
 TMP_DIR = os.environ.get("TMP_DIR", os.path.join(os.path.dirname(__file__), "../../tmp"))
 
 
-class QueueAddRequest(BaseModel):
+class QueueAddRequest(ClipOptions):
     urls: Optional[list[str]] = None
     url: Optional[str] = None
     format: DownloadFormat = DownloadFormat.mp4
@@ -49,7 +54,7 @@ class QueueAddRequest(BaseModel):
     title: Optional[str] = None
 
 
-class QuickFetchRequest(BaseModel):
+class QuickFetchRequest(ClipOptions):
     url: str
     format: DownloadFormat = DownloadFormat.mp4
     quality: str = "1080"
@@ -59,6 +64,8 @@ class QuickFetchRequest(BaseModel):
 class SettingsSyncRequest(BaseModel):
     max_concurrent: Optional[int] = None
     save_folder: Optional[str] = None
+    cookies_from_browser: Optional[str] = None
+    cookies_file: Optional[str] = None
 
 
 class OpenFolderRequest(BaseModel):
@@ -107,6 +114,10 @@ async def start_download(body: DownloadRequest, background_tasks: BackgroundTask
     """Queue a download job. Returns job_id for polling."""
     if not validate_url_not_private(body.url):
         raise HTTPException(status_code=400, detail="Invalid or private URL not allowed")
+    try:
+        validate_clip_range(body.start_time, body.end_time)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     validated_dir = _validate_save_dir(body.save_to_dir) if body.save_to_dir else None
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
@@ -126,6 +137,10 @@ async def start_download(body: DownloadRequest, background_tasks: BackgroundTask
         body.quality,
         body.title,
         validated_dir,
+        body.start_time,
+        body.end_time,
+        body.preset,
+        body.social_bypass,
     )
     return DownloadResponse(job_id=job_id, status="pending")
 
@@ -150,7 +165,7 @@ async def download_file(job_id: str):
     if not job["filename"] or not os.path.exists(job["filename"]):
         raise HTTPException(status_code=404, detail="File not found")
 
-    ext = job.get("format", "mp4")
+    ext = os.path.splitext(job["filename"])[1].lstrip(".") or job.get("format", "mp4")
     title = job.get("title") or "download"
     download_filename = _safe_filename(title, ext)
 
@@ -244,6 +259,11 @@ async def add_to_queue(body: QueueAddRequest):
     if not urls:
         raise HTTPException(status_code=400, detail="No URLs provided")
 
+    try:
+        validate_clip_range(body.start_time, body.end_time)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     fmt = body.format.value if hasattr(body.format, "value") else str(body.format)
     job_ids = []
     for raw_url in urls:
@@ -252,7 +272,16 @@ async def add_to_queue(body: QueueAddRequest):
             if not validate_url_not_private(clean):
                 raise HTTPException(status_code=400, detail=f"Invalid or private URL not allowed: {clean}")
             title = body.title if len(urls) == 1 else None
-            jid = queue_mgr.add(clean, fmt=fmt, quality=body.quality, title=title)
+            jid = queue_mgr.add(
+                clean,
+                fmt=fmt,
+                quality=body.quality,
+                title=title,
+                start_time=body.start_time,
+                end_time=body.end_time,
+                preset=body.preset,
+                social_bypass=body.social_bypass,
+            )
             job_ids.append(jid)
 
     return {"job_ids": job_ids, "count": len(job_ids)}
@@ -279,9 +308,12 @@ async def get_queue_stream():
 
 @router.get("/settings")
 async def get_backend_settings():
+    cookies = get_cookie_preferences()
     return {
         "max_concurrent": queue_mgr.max_concurrent,
         "save_folder": queue_mgr.save_dir,
+        "cookies_from_browser": cookies["cookies_from_browser"],
+        "cookies_file": cookies["cookies_file"],
     }
 
 
@@ -296,10 +328,37 @@ async def update_backend_settings(body: SettingsSyncRequest):
         if not ok:
             raise HTTPException(status_code=400, detail=err)
         queue_mgr.set_save_dir(body.save_folder)
+    try:
+        set_cookie_preferences(
+            cookies_from_browser=body.cookies_from_browser,
+            cookies_file=body.cookies_file,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    cookies = get_cookie_preferences()
     return {
         "max_concurrent": queue_mgr.max_concurrent,
         "save_folder": queue_mgr.save_dir,
+        "cookies_from_browser": cookies["cookies_from_browser"],
+        "cookies_file": cookies["cookies_file"],
     }
+
+
+@router.get("/system/extractor")
+async def extractor_status():
+    return get_extractor_status()
+
+
+@router.post("/system/update-extractor")
+async def update_extractor_endpoint():
+    try:
+        return await update_extractor()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach PyPI: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extractor update failed: {e}")
 
 
 @router.post("/open-folder")
@@ -332,15 +391,30 @@ async def rio_quick_fetch(body: QuickFetchRequest):
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(TMP_DIR, exist_ok=True)
 
+    try:
+        validate_clip_range(body.start_time, body.end_time)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     job_id = str(uuid.uuid4())
     fmt = body.format.value if hasattr(body.format, "value") else str(body.format)
     temp_store = {job_id: {"progress": 0.0}}
 
     try:
         tmp_filepath, extracted_title = await download_media(
-            body.url, fmt, body.quality, TMP_DIR, temp_store, job_id
+            body.url,
+            fmt,
+            body.quality,
+            TMP_DIR,
+            temp_store,
+            job_id,
+            start_time=body.start_time,
+            end_time=body.end_time,
+            preset=body.preset,
+            social_bypass=body.social_bypass,
         )
-        safe_name = _safe_filename(extracted_title, fmt)
+        output_ext = os.path.splitext(tmp_filepath)[1].lstrip(".") or fmt
+        safe_name = _safe_filename(extracted_title, output_ext)
         dest_path = os.path.join(save_dir, safe_name)
 
         base_name, ext = os.path.splitext(safe_name)
@@ -372,18 +446,34 @@ async def _run_download(
     quality: str,
     title: Optional[str] = None,
     save_to_dir: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    preset: Optional[str] = None,
+    social_bypass: bool = False,
 ):
     """Background task: download, optionally save to custom dir, then update job store."""
     _jobs[job_id]["status"] = "processing"
     try:
         os.makedirs(TMP_DIR, exist_ok=True)
-        filepath, extracted_title = await download_media(url, fmt, quality, TMP_DIR, _jobs, job_id)
+        filepath, extracted_title = await download_media(
+            url,
+            fmt,
+            quality,
+            TMP_DIR,
+            _jobs,
+            job_id,
+            start_time=start_time,
+            end_time=end_time,
+            preset=preset,
+            social_bypass=social_bypass,
+        )
         final_title = title or extracted_title or "download"
 
         target_dir = save_to_dir or queue_mgr.save_dir
         if target_dir and is_allowed_path(target_dir, queue_mgr.save_dir):
             os.makedirs(target_dir, exist_ok=True)
-            safe_name = _safe_filename(final_title, fmt)
+            output_ext = os.path.splitext(filepath)[1].lstrip(".") or fmt
+            safe_name = _safe_filename(final_title, output_ext)
             dest_path = os.path.join(target_dir, safe_name)
             base_name, ext = os.path.splitext(safe_name)
             counter = 1

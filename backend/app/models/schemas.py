@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Literal
 from enum import Enum
 
 
@@ -8,6 +8,7 @@ class MediaFormat(str, Enum):
     mp4 = "mp4"
     m4a = "m4a"
     opus = "opus"
+    images = "images"
 
 
 DownloadFormat = MediaFormat
@@ -30,7 +31,14 @@ class InfoRequest(BaseModel):
     url: str
 
 
-class DownloadRequest(BaseModel):
+class ClipOptions(BaseModel):
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    preset: Optional[Literal["edit_ready", "audio_norm", "audio_lossless"]] = None
+    social_bypass: bool = False
+
+
+class DownloadRequest(ClipOptions):
     url: str
     format: MediaFormat
     quality: str  # "320", "192", "1080", "720", etc.
@@ -53,6 +61,8 @@ class MediaInfo(BaseModel):
     uploader: Optional[str] = None
     platform: Optional[str] = None
     formats: List[FormatOption] = []
+    images: List[str] = []
+    media_type: str = "video"  # video | image | carousel
 
 
 class DownloadResponse(BaseModel):
