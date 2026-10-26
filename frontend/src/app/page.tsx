@@ -5,6 +5,10 @@ import {
   fetchInfo,
   enqueueDownload,
   cancelQueueItem,
+  pauseQueueItem,
+  resumeQueueItem,
+  retryQueueItem,
+  clearFinishedQueue,
   deleteHistoryItem,
   clearHistory,
   getQueueStreamUrl,
@@ -106,7 +110,7 @@ export default function Home() {
     autoDetectClipboard: true,
     minimizeToTray: true,
     notifyWhenFinished: true,
-    maxConcurrent: 3,
+    maxConcurrent: 2,
     saveFolder: "Downloads\\Universal Downloader",
     theme: "dark",
     cookiesFromBrowser: "none",
@@ -333,6 +337,73 @@ export default function Home() {
     } catch {}
   };
 
+  const handlePauseQueueItem = async (jobId: string) => {
+    setQueueItems((prev) =>
+      prev.map((item) =>
+        item.id === jobId
+          ? { ...item, status: "paused" as const, speed: 0 }
+          : item
+      )
+    );
+    try {
+      await pauseQueueItem(jobId);
+    } catch {}
+  };
+
+  const handleResumeQueueItem = async (jobId: string) => {
+    setQueueItems((prev) =>
+      prev.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              status: "queued" as const,
+              speed: 0,
+              error: undefined,
+              error_code: undefined,
+            }
+          : item
+      )
+    );
+    try {
+      await resumeQueueItem(jobId);
+    } catch {}
+  };
+
+  const handleRetryQueueItem = async (jobId: string) => {
+    setQueueItems((prev) =>
+      prev.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              status: "queued" as const,
+              progress: 0,
+              speed: 0,
+              filename: undefined,
+              error: undefined,
+              error_code: undefined,
+              retry_count: 0,
+            }
+          : item
+      )
+    );
+    try {
+      await retryQueueItem(jobId);
+    } catch {}
+  };
+
+  const handleClearFinished = async () => {
+    setQueueItems((prev) =>
+      prev.filter((item) => item.status !== "completed" && item.status !== "done")
+    );
+    try {
+      await clearFinishedQueue();
+    } catch {}
+  };
+
+  const handleOpenSettingsFromQueue = () => {
+    setActiveView("s");
+  };
+
   const handleRedownload = async (item: HistoryItem) => {
     try {
       await enqueueDownload(item.url, item.format, item.quality, item.title, {
@@ -403,6 +474,9 @@ export default function Home() {
 
   const activeQueueCount = queueItems.filter(
     (i) => i.status === "queued" || i.status === "downloading"
+  ).length;
+  const finishedQueueCount = queueItems.filter(
+    (i) => i.status === "completed" || i.status === "done"
   ).length;
 
   return (
@@ -491,9 +565,25 @@ export default function Home() {
               className={`v ${activeView === "q" ? "show" : ""}`}
               id="v-q"
             >
-              <div className="page-head">
-                <div className="cap">Queue</div>
-                <h2>Active downloads</h2>
+              <div className="page-head queue-head">
+                <div>
+                  <div className="cap">Queue</div>
+                  <h2>Active downloads</h2>
+                </div>
+                <div className="queue-tools">
+                  <span className="queue-count">
+                    {activeQueueCount} / {settings.maxConcurrent} active
+                  </span>
+                  {finishedQueueCount > 0 && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={handleClearFinished}
+                    >
+                      Clear finished
+                    </button>
+                  )}
+                </div>
               </div>
               {queueItems.length === 0 ? (
                 <div className="empty">
@@ -506,6 +596,10 @@ export default function Home() {
                       key={item.id}
                       item={item}
                       onCancel={handleCancelQueueItem}
+                      onPause={handlePauseQueueItem}
+                      onResume={handleResumeQueueItem}
+                      onRetry={handleRetryQueueItem}
+                      onOpenSettings={handleOpenSettingsFromQueue}
                     />
                   ))}
                 </div>

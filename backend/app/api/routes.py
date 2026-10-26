@@ -288,6 +288,35 @@ async def add_to_queue(body: QueueAddRequest):
     return {"job_ids": job_ids, "count": len(job_ids)}
 
 
+@router.post("/queue/clear-finished")
+async def clear_finished_queue():
+    return {"cleared": await queue_mgr.clear_finished()}
+
+
+@router.post("/queue/{job_id}/pause")
+async def pause_queue_item(job_id: str):
+    if job_id not in queue_mgr.items:
+        raise HTTPException(status_code=404, detail="Job not found")
+    paused = await queue_mgr.pause(job_id)
+    return {"paused": paused, "job_id": job_id}
+
+
+@router.post("/queue/{job_id}/resume")
+async def resume_queue_item(job_id: str):
+    if job_id not in queue_mgr.items:
+        raise HTTPException(status_code=404, detail="Job not found")
+    resumed = await queue_mgr.resume(job_id)
+    return {"resumed": resumed, "job_id": job_id}
+
+
+@router.post("/queue/{job_id}/retry")
+async def retry_queue_item(job_id: str):
+    if job_id not in queue_mgr.items:
+        raise HTTPException(status_code=404, detail="Job not found")
+    retried = await queue_mgr.retry(job_id)
+    return {"retried": retried, "job_id": job_id}
+
+
 @router.delete("/queue/{job_id}")
 async def delete_queue_item(job_id: str):
     try:
@@ -338,8 +367,8 @@ async def get_backend_settings():
 @router.post("/settings")
 async def update_backend_settings(body: SettingsSyncRequest):
     if body.max_concurrent is not None:
-        if body.max_concurrent not in (1, 2, 3, 5):
-            raise HTTPException(status_code=400, detail="max_concurrent must be 1, 2, 3, or 5")
+        if not 1 <= body.max_concurrent <= 5:
+            raise HTTPException(status_code=400, detail="max_concurrent must be between 1 and 5")
         queue_mgr.set_max_concurrent(body.max_concurrent)
     if body.save_folder:
         ok, err = is_safe_save_dir(body.save_folder)

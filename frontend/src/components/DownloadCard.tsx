@@ -4,11 +4,34 @@ import { QueueItem, startDragFile } from "../lib/api";
 export interface DownloadCardProps {
   item: QueueItem;
   onCancel: (id: string) => void;
+  onPause: (id: string) => void;
+  onResume: (id: string) => void;
+  onRetry: (id: string) => void;
+  onOpenSettings: () => void;
 }
 
-export function DownloadCard({ item, onCancel }: DownloadCardProps) {
+const ERROR_HINTS: Record<string, string> = {
+  AUTH_403: "403 Forbidden - try enabling Browser Cookies in Settings.",
+  COOKIE_REQUIRED: "Sign-in required - enable Browser Cookies in Settings.",
+  RATE_LIMIT: "Rate limited by the site - wait a moment, then retry.",
+  NETWORK_TRANSIENT: "Network problem - check your connection, then retry.",
+  UNSUPPORTED_URL: "This link is unsupported or the media is unavailable.",
+};
+
+const SETTINGS_ERROR_CODES = new Set(["AUTH_403", "COOKIE_REQUIRED", "RATE_LIMIT"]);
+
+export function DownloadCard({
+  item,
+  onCancel,
+  onPause,
+  onResume,
+  onRetry,
+  onOpenSettings,
+}: DownloadCardProps) {
   const isDone = item.status === "completed" || item.status === "done";
   const isActive = item.status === "queued" || item.status === "downloading";
+  const isPaused = item.status === "paused";
+  const isDownloading = item.status === "downloading";
   const qualityLabel = (() => {
     if (item.format === "m4a") return "M4A";
     if (item.format === "opus") return "OPUS";
@@ -22,18 +45,28 @@ export function DownloadCard({ item, onCancel }: DownloadCardProps) {
   })();
   const progressPercent = Math.min(100, Math.max(0, item.progress));
   const label = item.title || item.url;
+  const errorText =
+    (item.error_code && ERROR_HINTS[item.error_code]) ||
+    item.error ||
+    "Failed";
+  const showSettings = SETTINGS_ERROR_CODES.has(item.error_code || "");
 
   const statusText = isDone
     ? "Saved"
-    : item.status === "error"
-      ? item.error || "Failed"
-      : item.status === "queued"
-        ? "Queued"
-        : `${qualityLabel ? `${qualityLabel} · ` : ""}${(item.speed || 0).toFixed(1)} MB/s`;
+    : isPaused
+      ? "Paused"
+      : item.status === "error"
+        ? errorText
+        : item.status === "queued"
+          ? "Queued"
+          : `${qualityLabel ? `${qualityLabel} · ` : ""}${(item.speed || 0).toFixed(1)} MB/s`;
+
+  const statusClass =
+    item.status === "error" ? "bad" : isPaused ? "warn" : "";
 
   return (
     <div
-      className={`qrow ${isDone ? "done" : ""} ${isActive ? "active" : ""}`}
+      className={`qrow ${isDone ? "done" : ""} ${isActive ? "active" : ""} ${isPaused ? "paused" : ""}`}
       draggable={Boolean(isDone && item.filename)}
       onDragStart={(event) => {
         if (!isDone || !item.filename) return;
@@ -50,14 +83,56 @@ export function DownloadCard({ item, onCancel }: DownloadCardProps) {
         <span className="qpct">
           {isDone ? "100%" : item.status === "error" ? "—" : `${Math.round(item.progress)}%`}
         </span>
-        <button
-          type="button"
-          className="chip"
-          onClick={() => onCancel(item.id)}
-          aria-label={isDone ? `Clear ${label} from queue` : `Remove ${label} from queue`}
-        >
-          {isDone ? "Done" : "Remove"}
-        </button>
+        <div className="qactions">
+          {isDownloading && (
+            <button
+              type="button"
+              className="chip"
+              onClick={() => onPause(item.id)}
+              aria-label={`Pause ${label}`}
+            >
+              Pause
+            </button>
+          )}
+          {isPaused && (
+            <button
+              type="button"
+              className="chip"
+              onClick={() => onResume(item.id)}
+              aria-label={`Resume ${label}`}
+            >
+              Resume
+            </button>
+          )}
+          {item.status === "error" && (
+            <button
+              type="button"
+              className="chip"
+              onClick={() => onRetry(item.id)}
+              aria-label={`Retry ${label}`}
+            >
+              Retry
+            </button>
+          )}
+          {item.status === "error" && showSettings && (
+            <button
+              type="button"
+              className="chip"
+              onClick={onOpenSettings}
+              aria-label={`Open Settings for ${label}`}
+            >
+              Open Settings
+            </button>
+          )}
+          <button
+            type="button"
+            className="chip"
+            onClick={() => onCancel(item.id)}
+            aria-label={isDone ? `Clear ${label} from queue` : `Remove ${label} from queue`}
+          >
+            {isDone ? "Done" : "Remove"}
+          </button>
+        </div>
       </div>
 
       <div className="qline">
@@ -71,7 +146,7 @@ export function DownloadCard({ item, onCancel }: DownloadCardProps) {
         >
           <i style={{ transform: `scaleX(${progressPercent / 100})` }} />
         </div>
-        <span className={`qmeta ${item.status === "error" ? "bad" : ""}`} title={statusText}>
+        <span className={`qmeta ${statusClass}`} title={statusText}>
           {statusText}
         </span>
       </div>

@@ -8,7 +8,7 @@ import asyncio
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Set
 
-from app.services.extractor import download_media, _extract_platform
+from app.services.extractor import download_media, _extract_platform, diagnostic_message
 from app.services.history_store import history_store
 
 TMP_DIR = os.environ.get("TMP_DIR", os.path.join(os.path.dirname(__file__), "../../tmp"))
@@ -113,11 +113,13 @@ class QueueItem:
     quality: str = "1080"
     title: Optional[str] = None
     platform: str = "Web"
-    status: str = "queued"  # queued | downloading | completed | error
+    status: str = "queued"  # queued | downloading | paused | completed | error
     progress: float = 0.0
     speed: float = 0.0
     filename: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
+    retry_count: int = 0
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     preset: Optional[str] = None
@@ -125,18 +127,23 @@ class QueueItem:
 
 
 class QueueManager:
-    def __init__(self, max_concurrent: int = 3):
+    def __init__(self, max_concurrent: int = 2):
         self.max_concurrent = max_concurrent
         self.save_dir = os.path.realpath(DEFAULT_SAVE_DIR)
         self.items: Dict[str, QueueItem] = {}
         self.external_task_store: Dict[str, Any] = {}
         self._subscribers: Set[asyncio.Queue] = set()
         self._running_jobs: Set[str] = set()
+        self._worker_tasks: Dict[str, asyncio.Task] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
+        self._pause_requests: Set[str] = set()
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     def set_max_concurrent(self, value: int):
-        if value in (1, 2, 3, 5):
+        if 1 <= value <= 5:
             self.max_concurrent = value
+            # A new semaphore bounds new starts; downloads already running finish.
+            self._semaphore = asyncio.Semaphore(value)
             self.start_worker()
 
     def set_save_dir(self, folder: str) -> bool:
@@ -205,137 +212,247 @@ class QueueManager:
         await self.broadcast()
         return existed
 
-    def start_worker(self):
-        for jid, item in list(self.items.items()):
-            if len(self._running_jobs) >= self.max_concurrent:
-                break
-            if item.status == "queued" and jid not in self._running_jobs:
-                self._running_jobs.add(jid)
-                asyncio.create_task(self._worker(jid))
-
-    async def _worker(self, job_id: str):
+    async def pause(self, job_id: str) -> bool:
         item = self.items.get(job_id)
-        cancel_event = self._cancel_events.get(job_id)
-        if not item or (cancel_event and cancel_event.is_set()):
-            self._running_jobs.discard(job_id)
-            self._cancel_events.pop(job_id, None)
-            self.start_worker()
-            return
+        if not item:
+            return False
+        if item.status == "queued":
+            item.status = "paused"
+            item.speed = 0.0
+            await self.broadcast()
+            return True
+        if item.status == "downloading":
+            self._pause_requests.add(job_id)
+            ev = self._cancel_events.get(job_id)
+            if ev:
+                ev.set()
+            return True
+        return False
 
-        item.status = "downloading"
+    async def resume(self, job_id: str) -> bool:
+        item = self.items.get(job_id)
+        if not item or item.status != "paused":
+            return False
+        item.status = "queued"
+        item.speed = 0.0
+        item.error = None
+        item.error_code = None
+        self._pause_requests.discard(job_id)
+        self._cancel_events[job_id] = asyncio.Event()
+        self.start_worker()
+        await self.broadcast()
+        return True
+
+    async def retry(self, job_id: str) -> bool:
+        item = self.items.get(job_id)
+        if not item or item.status != "error":
+            return False
+        item.status = "queued"
         item.progress = 0.0
         item.speed = 0.0
+        item.filename = None
+        item.error = None
+        item.error_code = None
+        item.retry_count = 0
+        self._cancel_events[job_id] = asyncio.Event()
+        self.start_worker()
         await self.broadcast()
+        return True
 
-        tmp_store: Dict[str, Any] = {job_id: {"progress": 0.0, "speed": 0.0}}
-        stop_polling = asyncio.Event()
+    async def clear_finished(self) -> int:
+        finished = [
+            jid
+            for jid, item in self.items.items()
+            if item.status in ("completed", "done")
+        ]
+        for jid in finished:
+            self.items.pop(jid, None)
+        if finished:
+            await self.broadcast()
+        return len(finished)
 
-        async def _poll_progress():
-            while not stop_polling.is_set():
-                if job_id in tmp_store and job_id in self.items:
-                    item.progress = float(tmp_store[job_id].get("progress", 0.0))
-                    item.speed = float(tmp_store[job_id].get("speed", 0.0))
-                    await self.broadcast()
-                try:
-                    await asyncio.wait_for(stop_polling.wait(), timeout=0.4)
-                except asyncio.TimeoutError:
-                    pass
+    def start_worker(self):
+        for jid, item in list(self.items.items()):
+            if item.status != "queued" or jid in self._worker_tasks:
+                continue
+            self._running_jobs.add(jid)
+            self._worker_tasks[jid] = asyncio.create_task(self._worker(jid))
 
-        poll_task = asyncio.create_task(_poll_progress())
-
+    async def _worker(self, job_id: str):
+        task = asyncio.current_task()
+        cancel_event: Optional[asyncio.Event] = None
         try:
-            os.makedirs(TMP_DIR, exist_ok=True)
-            filepath, extracted_title = await download_media(
-                item.url,
-                item.format,
-                item.quality,
-                TMP_DIR,
-                tmp_store,
-                job_id,
-                cancel_event=cancel_event,
-                start_time=item.start_time,
-                end_time=item.end_time,
-                preset=item.preset,
-                social_bypass=item.social_bypass,
-            )
-            if cancel_event and cancel_event.is_set():
-                self._cleanup_tmp_files(job_id)
-                return
+            async with self._semaphore:
+                item = self.items.get(job_id)
+                cancel_event = self._cancel_events.get(job_id)
+                if (
+                    not item
+                    or item.status != "queued"
+                    or (cancel_event and cancel_event.is_set())
+                ):
+                    return
 
-            if not item.title or item.title == item.url:
-                item.title = extracted_title
-
-            # Move completed file into configured save_dir with clean filename
-            os.makedirs(self.save_dir, exist_ok=True)
-            ext = os.path.splitext(filepath)[1].lstrip(".") or item.format
-            clean_name = safe_filename(item.title or "download", ext)
-            dest_path = os.path.join(self.save_dir, clean_name)
-            base_name, ext_dot = os.path.splitext(clean_name)
-            counter = 1
-            while os.path.exists(dest_path):
-                dest_path = os.path.join(self.save_dir, f"{base_name} ({counter}){ext_dot}")
-                counter += 1
-            shutil.move(filepath, dest_path)
-
-            item.status = "completed"
-            item.progress = 100.0
-            item.speed = 0.0
-            item.filename = dest_path
-            item.error = None
-
-            try:
-                history_store.add(
-                    {
-                        "id": item.id,
-                        "url": item.url,
-                        "title": item.title,
-                        "format": item.format,
-                        "quality": item.quality,
-                        "platform": item.platform,
-                        "filename": item.filename,
-                        "completedAt": int(time.time() * 1000),
-                        "start_time": item.start_time,
-                        "end_time": item.end_time,
-                        "preset": item.preset,
-                        "social_bypass": item.social_bypass,
-                    }
-                )
-            except Exception:
-                # History is best-effort and must not turn a finished download into an error.
-                pass
-
-            if self.external_task_store is not None:
-                self.external_task_store[job_id] = {
-                    "status": "done",
-                    "progress": 100.0,
-                    "filename": dest_path,
-                    "title": item.title,
-                    "format": item.format,
-                    "error": None,
-                }
-        except Exception as e:
-            if cancel_event and cancel_event.is_set():
-                self.items.pop(job_id, None)
-                self._cleanup_tmp_files(job_id)
-            elif job_id in self.items:
-                item.status = "error"
+                item.status = "downloading"
+                item.progress = 0.0
                 item.speed = 0.0
-                item.error = str(e)
-                self._cleanup_tmp_files(job_id)
-                if self.external_task_store is not None:
-                    self.external_task_store[job_id] = {
-                        "status": "error",
-                        "progress": item.progress,
-                        "filename": None,
-                        "title": item.title,
-                        "format": item.format,
-                        "error": str(e),
-                    }
+                await self.broadcast()
+
+                tmp_store: Dict[str, Any] = {job_id: {"progress": 0.0, "speed": 0.0}}
+                stop_polling = asyncio.Event()
+
+                async def _poll_progress():
+                    while not stop_polling.is_set():
+                        if job_id in tmp_store and job_id in self.items:
+                            item.progress = float(tmp_store[job_id].get("progress", 0.0))
+                            item.speed = float(tmp_store[job_id].get("speed", 0.0))
+                            await self.broadcast()
+                        try:
+                            await asyncio.wait_for(stop_polling.wait(), timeout=0.4)
+                        except asyncio.TimeoutError:
+                            pass
+
+                poll_task = asyncio.create_task(_poll_progress())
+
+                try:
+                    while True:
+                        try:
+                            os.makedirs(TMP_DIR, exist_ok=True)
+                            filepath, extracted_title = await download_media(
+                                item.url,
+                                item.format,
+                                item.quality,
+                                TMP_DIR,
+                                tmp_store,
+                                job_id,
+                                cancel_event=cancel_event,
+                                start_time=item.start_time,
+                                end_time=item.end_time,
+                                preset=item.preset,
+                                social_bypass=item.social_bypass,
+                            )
+                            if cancel_event and cancel_event.is_set():
+                                if job_id in self._pause_requests:
+                                    item.status = "paused"
+                                    item.speed = 0.0
+                                    item.error = None
+                                    item.error_code = None
+                                else:
+                                    self.items.pop(job_id, None)
+                                    self._cleanup_tmp_files(job_id)
+                                break
+
+                            if not item.title or item.title == item.url:
+                                item.title = extracted_title
+
+                            # Move completed file into configured save_dir with clean filename
+                            os.makedirs(self.save_dir, exist_ok=True)
+                            ext = os.path.splitext(filepath)[1].lstrip(".") or item.format
+                            clean_name = safe_filename(item.title or "download", ext)
+                            dest_path = os.path.join(self.save_dir, clean_name)
+                            base_name, ext_dot = os.path.splitext(clean_name)
+                            counter = 1
+                            while os.path.exists(dest_path):
+                                dest_path = os.path.join(self.save_dir, f"{base_name} ({counter}){ext_dot}")
+                                counter += 1
+                            shutil.move(filepath, dest_path)
+
+                            item.status = "completed"
+                            item.progress = 100.0
+                            item.speed = 0.0
+                            item.filename = dest_path
+                            item.error = None
+                            item.error_code = None
+
+                            try:
+                                history_store.add(
+                                    {
+                                        "id": item.id,
+                                        "url": item.url,
+                                        "title": item.title,
+                                        "format": item.format,
+                                        "quality": item.quality,
+                                        "platform": item.platform,
+                                        "filename": item.filename,
+                                        "completedAt": int(time.time() * 1000),
+                                        "start_time": item.start_time,
+                                        "end_time": item.end_time,
+                                        "preset": item.preset,
+                                        "social_bypass": item.social_bypass,
+                                    }
+                                )
+                            except Exception:
+                                # History is best-effort and must not turn a finished download into an error.
+                                pass
+
+                            if self.external_task_store is not None:
+                                self.external_task_store[job_id] = {
+                                    "status": "done",
+                                    "progress": 100.0,
+                                    "filename": dest_path,
+                                    "title": item.title,
+                                    "format": item.format,
+                                    "error": None,
+                                }
+                            break
+                        except Exception as e:
+                            if job_id in self._pause_requests:
+                                item.status = "paused"
+                                item.speed = 0.0
+                                item.error = None
+                                item.error_code = None
+                                break
+                            if cancel_event and cancel_event.is_set():
+                                self.items.pop(job_id, None)
+                                self._cleanup_tmp_files(job_id)
+                                break
+
+                            error_code, user_message = diagnostic_message(
+                                str(e), item.url
+                            )
+                            if error_code == "NETWORK_TRANSIENT" and item.retry_count < 2:
+                                item.retry_count += 1
+                                item.speed = 0.0
+                                item.error = user_message
+                                item.error_code = error_code
+                                await self.broadcast()
+                                await asyncio.sleep(2 ** (item.retry_count - 1))
+                                if job_id in self._pause_requests:
+                                    item.status = "paused"
+                                    item.speed = 0.0
+                                    item.error = None
+                                    item.error_code = None
+                                    break
+                                if cancel_event and cancel_event.is_set():
+                                    self.items.pop(job_id, None)
+                                    self._cleanup_tmp_files(job_id)
+                                    break
+                                continue
+
+                            item.status = "error"
+                            item.speed = 0.0
+                            item.error = user_message
+                            item.error_code = error_code
+                            self._cleanup_tmp_files(job_id)
+                            if self.external_task_store is not None:
+                                self.external_task_store[job_id] = {
+                                    "status": "error",
+                                    "progress": item.progress,
+                                    "filename": None,
+                                    "title": item.title,
+                                    "format": item.format,
+                                    "error": user_message,
+                                }
+                            break
+                finally:
+                    stop_polling.set()
+                    await poll_task
+                    self._running_jobs.discard(job_id)
         finally:
-            stop_polling.set()
-            await poll_task
-            self._running_jobs.discard(job_id)
-            self._cancel_events.pop(job_id, None)
+            self._pause_requests.discard(job_id)
+            if self._worker_tasks.get(job_id) is task:
+                self._worker_tasks.pop(job_id, None)
+            if cancel_event is not None and self._cancel_events.get(job_id) is cancel_event:
+                self._cancel_events.pop(job_id, None)
             await self.broadcast()
             self.start_worker()
 
@@ -363,4 +480,4 @@ class QueueManager:
             self._subscribers.discard(q)
 
 
-queue_mgr = QueueManager(max_concurrent=3)
+queue_mgr = QueueManager(max_concurrent=2)

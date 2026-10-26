@@ -1092,6 +1092,37 @@ button.chip svg.i {
   flex: none;
 }
 
+.qactions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.qrow.paused {
+  background: var(--accent-dim);
+}
+
+.queue-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.queue-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.queue-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .qmeta {
   flex: none;
   max-width: 42%;
@@ -1104,6 +1135,11 @@ button.chip svg.i {
 
 .qmeta.bad {
   color: var(--danger);
+}
+
+.qmeta.warn {
+  color: var(--accent-light);
+  font-weight: 600;
 }
 
 .pg {

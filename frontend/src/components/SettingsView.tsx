@@ -336,17 +336,19 @@ export function SettingsView({
 
         <SettingRow title="Simultaneous downloads">
           <select
+            id="concurrency"
             aria-label="Simultaneous downloads"
             value={settings.maxConcurrent}
             onChange={(e) =>
               onUpdate({
-                maxConcurrent: Number(e.target.value) as 1 | 2 | 3 | 5,
+                maxConcurrent: Number(e.target.value) as 1 | 2 | 3 | 4 | 5,
               })
             }
           >
             <option value={1}>1</option>
             <option value={2}>2</option>
             <option value={3}>3</option>
+            <option value={4}>4</option>
             <option value={5}>5</option>
           </select>
         </SettingRow>

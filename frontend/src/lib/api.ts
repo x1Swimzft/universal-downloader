@@ -63,11 +63,13 @@ export interface QueueItem {
   quality: string;
   title?: string;
   platform?: string;
-  status: "queued" | "downloading" | "completed" | "done" | "error";
+  status: "queued" | "downloading" | "paused" | "completed" | "done" | "error";
   progress: number;
   speed?: number;
   filename?: string;
   error?: string;
+  error_code?: string;
+  retry_count?: number;
   start_time?: string;
   end_time?: string;
   preset?: string;
@@ -78,7 +80,7 @@ export interface AppSettings {
   autoDetectClipboard: boolean;
   minimizeToTray: boolean;
   notifyWhenFinished: boolean;
-  maxConcurrent: 1 | 2 | 3 | 5;
+  maxConcurrent: 1 | 2 | 3 | 4 | 5;
   saveFolder: string;
   theme: "light" | "dark";
   cookiesFromBrowser: CookieBrowser;
@@ -269,6 +271,48 @@ export async function cancelQueueItem(jobId: string): Promise<void> {
   }
 }
 
+async function queueLifecycleAction(
+  jobId: string,
+  action: "pause" | "resume" | "retry",
+  fallbackError: string
+): Promise<void> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiBase()}/api/queue/${encodeURIComponent(jobId)}/${action}`,
+    { method: "POST", headers: authHeaders }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || fallbackError);
+  }
+}
+
+export async function pauseQueueItem(jobId: string): Promise<void> {
+  await queueLifecycleAction(jobId, "pause", "Failed to pause download");
+}
+
+export async function resumeQueueItem(jobId: string): Promise<void> {
+  await queueLifecycleAction(jobId, "resume", "Failed to resume download");
+}
+
+export async function retryQueueItem(jobId: string): Promise<void> {
+  await queueLifecycleAction(jobId, "retry", "Failed to retry download");
+}
+
+export async function clearFinishedQueue(): Promise<number> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${getApiBase()}/api/queue/clear-finished`, {
+    method: "POST",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to clear finished downloads");
+  }
+  const data = await res.json().catch(() => ({}));
+  return typeof data.cleared === "number" ? data.cleared : 0;
+}
+
 export async function fetchHistory(): Promise<HistoryItem[]> {
   try {
     const res = await fetch(`${getApiBase()}/api/history`);
@@ -314,7 +358,7 @@ export const DEFAULT_FALLBACK_SETTINGS: AppSettings = {
   autoDetectClipboard: true,
   minimizeToTray: true,
   notifyWhenFinished: true,
-  maxConcurrent: 3,
+  maxConcurrent: 2,
   saveFolder: "Downloads\\Universal Downloader",
   theme: "dark",
   cookiesFromBrowser: "none",
@@ -336,7 +380,7 @@ export async function getAppSettings(): Promise<AppSettings> {
       const data = await res.json();
       return {
         ...DEFAULT_FALLBACK_SETTINGS,
-        maxConcurrent: data.max_concurrent || 3,
+        maxConcurrent: data.max_concurrent || 2,
         saveFolder: data.save_folder || DEFAULT_FALLBACK_SETTINGS.saveFolder,
         cookiesFromBrowser: data.cookies_from_browser || "none",
         cookiesFile: data.cookies_file || "",

@@ -91,7 +91,7 @@ function getDefaultSettings() {
     autoDetectClipboard: true,
     minimizeToTray: true,
     notifyWhenFinished: true,
-    maxConcurrent: 3,
+    maxConcurrent: 2,
     saveFolder: path.join(app.getPath("downloads"), "Universal Downloader"),
     theme: "dark",
     cookiesFromBrowser: "none",
@@ -120,7 +120,7 @@ function loadSettings() {
           typeof parsed.notifyWhenFinished === "boolean"
             ? parsed.notifyWhenFinished
             : defaults.notifyWhenFinished,
-        maxConcurrent: [1, 2, 3, 5].includes(Number(parsed.maxConcurrent))
+        maxConcurrent: [1, 2, 3, 4, 5].includes(Number(parsed.maxConcurrent))
           ? Number(parsed.maxConcurrent)
           : defaults.maxConcurrent,
         saveFolder:
@@ -546,7 +546,7 @@ function registerIpcHandlers() {
     if (typeof patch.notifyWhenFinished === "boolean") {
       settings.notifyWhenFinished = patch.notifyWhenFinished;
     }
-    if ([1, 2, 3, 5].includes(Number(patch.maxConcurrent))) {
+    if ([1, 2, 3, 4, 5].includes(Number(patch.maxConcurrent))) {
       settings.maxConcurrent = Number(patch.maxConcurrent);
     }
     if (patch.theme === "light" || patch.theme === "dark") {

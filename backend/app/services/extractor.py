@@ -320,6 +320,84 @@ def _friendly_error(msg: str, url: str) -> Optional[str]:
     return None
 
 
+_ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_ERROR_MESSAGES = {
+    "AUTH_403": "403 Forbidden - try enabling Browser Cookies in Settings.",
+    "COOKIE_REQUIRED": "Sign-in required - enable Browser Cookies in Settings.",
+    "RATE_LIMIT": "Rate limited by the site - wait a moment, then retry.",
+    "NETWORK_TRANSIENT": "Network problem - check your connection, then retry.",
+    "UNSUPPORTED_URL": "This link is unsupported or the media is unavailable.",
+}
+
+
+def _clean_error_text(message: str) -> str:
+    text = _ANSI_RE.sub("", str(message or "")).strip()
+    text = re.sub(r"^ERROR:\s*", "", text, flags=re.IGNORECASE)
+    return text or "Download failed"
+
+
+def classify_error(message: str, url: str = "") -> str:
+    """Map a raw yt-dlp failure to a stable error code for the UI."""
+    text = _clean_error_text(message)
+    lower = text.lower()
+    if "403" in text or "forbidden" in lower:
+        return "AUTH_403"
+    if any(
+        hint in lower
+        for hint in (
+            "sign in",
+            "sign-in",
+            "login",
+            "log in",
+            "logging in",
+            "cookies",
+            "private",
+            "age-restricted",
+            "age restricted",
+            "confirm your age",
+            "members-only",
+            "requires authentication",
+        )
+    ):
+        return "COOKIE_REQUIRED"
+    if "429" in text or "rate limit" in lower or "too many requests" in lower:
+        return "RATE_LIMIT"
+    if (
+        any(
+            hint in lower
+            for hint in (
+                "timed out",
+                "timeout",
+                "connection",
+                "network",
+                "temporary failure",
+                "unreachable",
+                "getaddrinfo",
+            )
+        )
+        or re.search(r"\b5\d{2}\b", text)
+    ):
+        return "NETWORK_TRANSIENT"
+    if any(
+        hint in lower
+        for hint in (
+            "unsupported url",
+            "no video formats",
+            "not available",
+            "video unavailable",
+            "no media",
+        )
+    ):
+        return "UNSUPPORTED_URL"
+    return "UNKNOWN"
+
+
+def diagnostic_message(message: str, url: str = "") -> tuple[str, str]:
+    """Return a stable error code plus user-facing guidance."""
+    code = classify_error(message, url)
+    return code, _ERROR_MESSAGES.get(code, _clean_error_text(message))
+
+
 def _extract_platform(url: str) -> str:
     """Detect platform from URL."""
     patterns = {
@@ -586,6 +664,7 @@ def _build_ydl_opts(
             "progress_hooks": [progress_hook],
             "merge_output_format": "mp4" if fmt in ("mp4", "images") else None,
             "postprocessors": [],
+            "continuedl": True,
         }
     )
 
