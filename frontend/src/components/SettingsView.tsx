@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import {
   AppSettings,
+  AUDIO_FILENAME_TEMPLATES,
+  AudioFilenameTemplate,
   checkForAppUpdate,
   CookieBrowser,
   ExtractorStatus,
@@ -51,6 +53,15 @@ const SCALE_OPTIONS: SegmentOption[] = [
   { value: "115", label: "115%" },
   { value: "125", label: "125%" },
 ];
+
+const CONCURRENCY_OPTIONS: SegmentOption[] = [1, 2, 3, 4, 5].map((value) => ({
+  value: String(value),
+  label: String(value),
+}));
+
+const AUDIO_TEMPLATE_OPTIONS: SegmentOption[] = AUDIO_FILENAME_TEMPLATES.map(
+  (template) => ({ value: template, label: template })
+);
 
 function Segmented({
   label,
@@ -370,22 +381,38 @@ export function SettingsView({
           />
         </SettingRow>
 
-        <SettingRow title="Simultaneous downloads">
-          <select
-            id="concurrency"
-            aria-label="Simultaneous downloads"
-            value={settings.maxConcurrent}
-            onChange={(e) =>
+        <SettingRow title="Max concurrent downloads">
+          <Segmented
+            label="Max concurrent downloads"
+            options={CONCURRENCY_OPTIONS}
+            value={String(settings.maxConcurrent)}
+            onChange={(value) =>
               onUpdate({
-                maxConcurrent: Number(e.target.value) as 1 | 2 | 3 | 4 | 5,
+                maxConcurrent: Number(value) as 1 | 2 | 3 | 4 | 5,
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="Audio filename template"
+          subtitle={settings.audioFilenameTemplate}
+        >
+          <select
+            aria-label="Audio filename template"
+            value={settings.audioFilenameTemplate}
+            onChange={(event) =>
+              onUpdate({
+                audioFilenameTemplate:
+                  event.target.value as AudioFilenameTemplate,
               })
             }
           >
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-            <option value={5}>5</option>
+            {AUDIO_TEMPLATE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </SettingRow>
 

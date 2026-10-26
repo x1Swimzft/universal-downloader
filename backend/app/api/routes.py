@@ -22,11 +22,13 @@ from app.models.schemas import (
     ClipOptions,
 )
 from app.services.extractor import (
+    AUDIO_FILENAME_TEMPLATES,
     extract_info,
     inspect_entries,
     _friendly_error,
     diagnostic_message,
     download_media,
+    format_audio_filename,
     get_direct_stream_url,
     validate_url_not_private,
     validate_clip_range,
@@ -61,6 +63,13 @@ class QueueAddRequest(ClipOptions):
     format: DownloadFormat = DownloadFormat.mp4
     quality: str = "1080"
     title: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    search_query: Optional[str] = None
+    playlist_title: Optional[str] = None
+    track_number: Optional[int] = None
+    save_in_subfolder: bool = True
+    thumbnail: Optional[str] = None
 
 
 class QuickFetchRequest(ClipOptions):
@@ -75,6 +84,7 @@ class SettingsSyncRequest(BaseModel):
     save_folder: Optional[str] = None
     cookies_from_browser: Optional[str] = None
     cookies_file: Optional[str] = None
+    audio_filename_template: Optional[str] = None
 
 
 class OpenFolderRequest(BaseModel):
@@ -339,6 +349,13 @@ async def add_to_queue(body: QueueAddRequest):
                 end_time=body.end_time,
                 preset=body.preset,
                 social_bypass=body.social_bypass,
+                artist=body.artist,
+                album=body.album,
+                search_query=body.search_query,
+                thumbnail=body.thumbnail,
+                playlist_title=body.playlist_title,
+                track_number=body.track_number,
+                save_in_subfolder=body.save_in_subfolder,
             )
             job_ids.append(jid)
 
@@ -418,6 +435,7 @@ async def get_backend_settings():
         "save_folder": queue_mgr.save_dir,
         "cookies_from_browser": cookies["cookies_from_browser"],
         "cookies_file": cookies["cookies_file"],
+        "audio_filename_template": queue_mgr.audio_filename_template,
     }
 
 
@@ -427,6 +445,10 @@ async def update_backend_settings(body: SettingsSyncRequest):
         if not 1 <= body.max_concurrent <= 5:
             raise HTTPException(status_code=400, detail="max_concurrent must be between 1 and 5")
         queue_mgr.set_max_concurrent(body.max_concurrent)
+    if body.audio_filename_template is not None:
+        if body.audio_filename_template not in AUDIO_FILENAME_TEMPLATES:
+            raise HTTPException(status_code=400, detail="Unknown audio filename template")
+        queue_mgr.set_audio_filename_template(body.audio_filename_template)
     if body.save_folder:
         ok, err = is_safe_save_dir(body.save_folder)
         if not ok:
@@ -445,6 +467,7 @@ async def update_backend_settings(body: SettingsSyncRequest):
         "save_folder": queue_mgr.save_dir,
         "cookies_from_browser": cookies["cookies_from_browser"],
         "cookies_file": cookies["cookies_file"],
+        "audio_filename_template": queue_mgr.audio_filename_template,
     }
 
 
@@ -518,7 +541,17 @@ async def rio_quick_fetch(body: QuickFetchRequest):
             social_bypass=body.social_bypass,
         )
         output_ext = os.path.splitext(tmp_filepath)[1].lstrip(".") or fmt
-        safe_name = _safe_filename(extracted_title, output_ext)
+        is_audio = output_ext.lower() in ("mp3", "m4a", "opus") or (
+            output_ext.lower() == "flac" and body.preset == "audio_lossless"
+        )
+        if is_audio:
+            safe_name = format_audio_filename(
+                queue_mgr.audio_filename_template,
+                {"title": extracted_title},
+                output_ext,
+            )
+        else:
+            safe_name = _safe_filename(extracted_title, output_ext)
         dest_path = os.path.join(save_dir, safe_name)
 
         base_name, ext = os.path.splitext(safe_name)
@@ -577,7 +610,17 @@ async def _run_download(
         if target_dir and is_allowed_path(target_dir, queue_mgr.save_dir):
             os.makedirs(target_dir, exist_ok=True)
             output_ext = os.path.splitext(filepath)[1].lstrip(".") or fmt
-            safe_name = _safe_filename(final_title, output_ext)
+            is_audio = output_ext.lower() in ("mp3", "m4a", "opus") or (
+                output_ext.lower() == "flac" and preset == "audio_lossless"
+            )
+            if is_audio:
+                safe_name = format_audio_filename(
+                    queue_mgr.audio_filename_template,
+                    {"title": extracted_title},
+                    output_ext,
+                )
+            else:
+                safe_name = _safe_filename(final_title, output_ext)
             dest_path = os.path.join(target_dir, safe_name)
             base_name, ext = os.path.splitext(safe_name)
             counter = 1

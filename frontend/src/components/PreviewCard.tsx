@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { Icon } from "./Icons";
+import { Switch } from "./Switch";
 import { MediaInfo, PreviewEntry } from "../lib/api";
 
 export interface DownloadChoices {
   startTime?: string;
   endTime?: string;
   preset?: string;
+  saveInSubfolder?: boolean;
 }
 
 export interface PreviewCardProps {
@@ -127,6 +129,7 @@ export function PreviewCard({
   const [preset, setPreset] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [saveInSubfolder, setSaveInSubfolder] = useState(true);
   const entries = info.entries || [];
   const entryUrls = entries.map((entry) => entry.url).join("\n");
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
@@ -157,6 +160,7 @@ export function PreviewCard({
     setPreset("");
     setStartTime("");
     setEndTime("");
+    setSaveInSubfolder(true);
   }, [info.title, info.thumbnail]);
 
   const parts: string[] = [];
@@ -307,6 +311,8 @@ export function PreviewCard({
                   {entries.map((entry) => {
                     const meta = [
                       formatDuration(entry.duration),
+                      entry.artist,
+                      entry.album,
                       entry.platform,
                     ]
                       .filter(Boolean)
@@ -325,6 +331,16 @@ export function PreviewCard({
                     );
                   })}
                 </div>
+                {info.platform !== "Multiple" && (
+                  <div className="plist-subfolder">
+                    <span>Save playlist in subfolder</span>
+                    <Switch
+                      checked={saveInSubfolder}
+                      onChange={setSaveInSubfolder}
+                      ariaLabel="Save playlist in subfolder"
+                    />
+                  </div>
+                )}
                 <div className="plist-actions">
                   <button
                     type="button"
@@ -351,6 +367,7 @@ export function PreviewCard({
                     onClick={() =>
                       onEnqueueSelected?.(selectedEntries, {
                         preset: preset || undefined,
+                        saveInSubfolder,
                       })
                     }
                     disabled={selectedEntries.length === 0 || enqueueing}
@@ -358,8 +375,8 @@ export function PreviewCard({
                   >
                     <Icon name="dl" />
                     {enqueueing
-                      ? "Enqueueing…"
-                      : `Enqueue Selected (${selectedEntries.length})`}
+                      ? "Starting…"
+                      : `Download Selected (${selectedEntries.length})`}
                   </button>
                 </div>
               </>

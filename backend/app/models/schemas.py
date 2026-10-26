@@ -44,6 +44,13 @@ class DownloadRequest(ClipOptions):
     quality: str  # "320", "192", "1080", "720", etc.
     title: Optional[str] = None
     save_to_dir: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    search_query: Optional[str] = None
+    playlist_title: Optional[str] = None
+    track_number: Optional[int] = None
+    save_in_subfolder: bool = True
+    thumbnail: Optional[str] = None
 
 
 class FormatOption(BaseModel):

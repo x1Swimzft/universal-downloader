@@ -26,6 +26,12 @@ if (process.platform === "win32") {
 }
 const QUICK_FETCH_ACCELERATOR = "CommandOrControl+Shift+D";
 const COOKIE_BROWSERS = ["none", "chrome", "edge", "brave", "firefox"];
+const AUDIO_FILENAME_TEMPLATES = [
+  "{track} - {artist} - {title}",
+  "{artist} - {title}",
+  "{title} ({artist})",
+  "{title}",
+];
 const MEDIA_URL_RE =
   /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com)\/.+/i;
 
@@ -91,7 +97,8 @@ function getDefaultSettings() {
     autoDetectClipboard: true,
     minimizeToTray: true,
     notifyWhenFinished: true,
-    maxConcurrent: 2,
+    maxConcurrent: 3,
+    audioFilenameTemplate: "{artist} - {title}",
     saveFolder: path.join(app.getPath("downloads"), "Universal Downloader"),
     theme: "dark",
     cookiesFromBrowser: "none",
@@ -123,6 +130,11 @@ function loadSettings() {
         maxConcurrent: [1, 2, 3, 4, 5].includes(Number(parsed.maxConcurrent))
           ? Number(parsed.maxConcurrent)
           : defaults.maxConcurrent,
+        audioFilenameTemplate: AUDIO_FILENAME_TEMPLATES.includes(
+          parsed.audioFilenameTemplate
+        )
+          ? parsed.audioFilenameTemplate
+          : defaults.audioFilenameTemplate,
         saveFolder:
           typeof parsed.saveFolder === "string" && path.isAbsolute(parsed.saveFolder)
             ? parsed.saveFolder
@@ -170,6 +182,7 @@ function syncSettingsToBackend() {
     save_folder: settings.saveFolder,
     cookies_from_browser: settings.cookiesFromBrowser,
     cookies_file: settings.cookiesFile,
+    audio_filename_template: settings.audioFilenameTemplate,
   });
   const req = http.request(
     {
@@ -602,6 +615,9 @@ function registerIpcHandlers() {
     }
     if ([1, 2, 3, 4, 5].includes(Number(patch.maxConcurrent))) {
       settings.maxConcurrent = Number(patch.maxConcurrent);
+    }
+    if (AUDIO_FILENAME_TEMPLATES.includes(patch.audioFilenameTemplate)) {
+      settings.audioFilenameTemplate = patch.audioFilenameTemplate;
     }
     if (patch.theme === "light" || patch.theme === "dark") {
       settings.theme = patch.theme;

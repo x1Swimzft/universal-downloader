@@ -46,11 +46,20 @@ const HISTORY_STORAGE_KEY = "ud_history_v1";
 
 const PLATFORM_PATTERNS: Array<[string, RegExp]> = [
   ["YouTube", /youtu/i],
+  ["Spotify", /spotify/i],
+  ["Apple Music", /music\.apple\.com|apple music/i],
   ["TikTok", /tiktok/i],
   ["Instagram", /instagram/i],
   ["X", /twitter|x\.com/i],
   ["Facebook", /facebook|fb\./i],
+  ["Twitch", /twitch/i],
+  ["Kick", /kick\.com/i],
+  ["Bilibili", /bilibili/i],
+  ["Reddit", /reddit/i],
+  ["Pinterest", /pinterest|pin\.it/i],
+  ["Vimeo", /vimeo/i],
   ["SoundCloud", /soundcloud/i],
+  ["Bandcamp", /bandcamp/i],
 ];
 
 function detectPlatformName(url: string): string {
@@ -58,9 +67,13 @@ function detectPlatformName(url: string): string {
   return found ? found[0] : "";
 }
 
+function isMusicPlatform(value?: string): boolean {
+  return /spotify|apple/i.test(value || "");
+}
+
 function parseUrls(value: string): string[] {
   const urls: string[] = [];
-  for (const part of value.split(/\s+/)) {
+  for (const part of value.split(/[\s,]+/)) {
     const candidate = part.trim();
     if (/^https?:\/\//i.test(candidate) && !urls.includes(candidate)) {
       urls.push(candidate);
@@ -123,7 +136,8 @@ export default function Home() {
     autoDetectClipboard: true,
     minimizeToTray: true,
     notifyWhenFinished: true,
-    maxConcurrent: 2,
+    maxConcurrent: 3,
+    audioFilenameTemplate: "{artist} - {title}",
     saveFolder: "Downloads\\Universal Downloader",
     theme: "dark",
     cookiesFromBrowser: "none",
@@ -264,7 +278,12 @@ export default function Home() {
           const hasVideo = media.formats?.some(
             (f) => f.resolution && f.resolution !== "audio"
           );
-          if (isPlaylist || isImagePost) {
+          const music =
+            isMusicPlatform(media.platform) || isMusicPlatform(urls[0]);
+          if (music) {
+            setMode("Audio");
+            setSelectedOption("MP3 320k");
+          } else if (isPlaylist || isImagePost) {
             setMode("Video");
             setSelectedOption("1080p");
           } else if (!hasVideo || media.platform === "soundcloud") {
@@ -276,6 +295,9 @@ export default function Home() {
           }
         } else {
           const preview = await previewUrls(urls);
+          const musicBatch =
+            preview.items.length > 0 &&
+            preview.items.every((entry) => isMusicPlatform(entry.platform));
           setInfo({
             title: `${urls.length} links`,
             media_type: "playlist",
@@ -283,8 +305,8 @@ export default function Home() {
             entries: preview.items,
             formats: [],
           });
-          setMode("Video");
-          setSelectedOption("1080p");
+          setMode(musicBatch ? "Audio" : "Video");
+          setSelectedOption(musicBatch ? "MP3 320k" : "1080p");
           if (preview.failed?.length) {
             setErrorMsg(
               `Skipped ${preview.failed.length} link${
@@ -356,6 +378,15 @@ export default function Home() {
       await enqueueDownload(url.trim(), format, quality, info.title, {
         ...choices,
         socialBypass: settings.socialBypass,
+        ...(isMusicPlatform(info.platform) || isMusicPlatform(url)
+          ? {
+              artist: info.artist,
+              album: info.album,
+              trackNumber: info.track_number,
+              searchQuery: info.search_query,
+              thumbnail: info.thumbnail,
+            }
+          : {}),
       });
       setActiveView("q");
     } catch (e: unknown) {
@@ -369,7 +400,7 @@ export default function Home() {
     entries: PreviewEntry[],
     choices?: DownloadChoices
   ) => {
-    if (entries.length === 0) return;
+    if (!info || entries.length === 0) return;
     setStartingDownload(true);
     setErrorMsg("");
     try {
@@ -377,10 +408,31 @@ export default function Home() {
         mode,
         selectedOption
       );
-      for (const entry of entries) {
+      const allEntries = info.entries || [];
+      const isBatch = info.platform === "Multiple";
+      for (let position = 0; position < entries.length; position += 1) {
+        const entry = entries[position];
+        const playlistIndex = allEntries.findIndex(
+          (candidate) => candidate.url === entry.url
+        );
+        const trackNumber = isBatch
+          ? undefined
+          : entry.track_number ??
+            (playlistIndex >= 0 ? playlistIndex : position) + 1;
         await enqueueDownload(entry.url, format, quality, entry.title, {
           ...choices,
           socialBypass: settings.socialBypass,
+          artist: entry.artist,
+          album: entry.album,
+          trackNumber,
+          searchQuery: entry.search_query,
+          thumbnail: entry.thumbnail,
+          ...(isBatch
+            ? {}
+            : {
+                playlistTitle: info.title,
+                saveInSubfolder: choices?.saveInSubfolder ?? true,
+              }),
         });
       }
       setActiveView("q");

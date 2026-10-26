@@ -8,7 +8,14 @@ import asyncio
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Set
 
-from app.services.extractor import download_media, _extract_platform, diagnostic_message
+from app.services.extractor import (
+    AUDIO_FILENAME_TEMPLATES,
+    download_media,
+    _extract_platform,
+    diagnostic_message,
+    format_audio_filename,
+    sanitize_name,
+)
 from app.services.history_store import history_store
 
 TMP_DIR = os.environ.get("TMP_DIR", os.path.join(os.path.dirname(__file__), "../../tmp"))
@@ -124,11 +131,19 @@ class QueueItem:
     end_time: Optional[str] = None
     preset: Optional[str] = None
     social_bypass: bool = False
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    search_query: Optional[str] = None
+    thumbnail: Optional[str] = None
+    playlist_title: Optional[str] = None
+    track_number: Optional[int] = None
+    save_in_subfolder: bool = True
 
 
 class QueueManager:
-    def __init__(self, max_concurrent: int = 2):
+    def __init__(self, max_concurrent: int = 3):
         self.max_concurrent = max_concurrent
+        self.audio_filename_template = "{artist} - {title}"
         self.save_dir = os.path.realpath(DEFAULT_SAVE_DIR)
         self.items: Dict[str, QueueItem] = {}
         self.external_task_store: Dict[str, Any] = {}
@@ -145,6 +160,11 @@ class QueueManager:
             # A new semaphore bounds new starts; downloads already running finish.
             self._semaphore = asyncio.Semaphore(value)
             self.start_worker()
+
+    def set_audio_filename_template(self, value: str):
+        if value not in AUDIO_FILENAME_TEMPLATES:
+            raise ValueError("Unknown audio filename template")
+        self.audio_filename_template = value
 
     def set_save_dir(self, folder: str) -> bool:
         ok, _ = is_safe_save_dir(folder)
@@ -174,6 +194,13 @@ class QueueManager:
         end_time: Optional[str] = None,
         preset: Optional[str] = None,
         social_bypass: bool = False,
+        artist: Optional[str] = None,
+        album: Optional[str] = None,
+        search_query: Optional[str] = None,
+        thumbnail: Optional[str] = None,
+        playlist_title: Optional[str] = None,
+        track_number: Optional[int] = None,
+        save_in_subfolder: bool = True,
     ) -> str:
         job_id = str(uuid.uuid4())
         plat = _extract_platform(url).capitalize()
@@ -191,6 +218,13 @@ class QueueManager:
             end_time=end_time,
             preset=preset,
             social_bypass=social_bypass,
+            artist=artist,
+            album=album,
+            search_query=search_query,
+            thumbnail=thumbnail,
+            playlist_title=playlist_title,
+            track_number=track_number,
+            save_in_subfolder=save_in_subfolder,
         )
         self.items[job_id] = item
         self._cancel_events[job_id] = asyncio.Event()
@@ -317,6 +351,20 @@ class QueueManager:
                     while True:
                         try:
                             os.makedirs(TMP_DIR, exist_ok=True)
+                            music_metadata = None
+                            if (
+                                item.artist
+                                or item.album
+                                or item.thumbnail
+                                or item.search_query
+                            ):
+                                music_metadata = {
+                                    "title": item.title,
+                                    "artist": item.artist,
+                                    "album": item.album,
+                                    "track_number": item.track_number,
+                                    "thumbnail": item.thumbnail,
+                                }
                             filepath, extracted_title = await download_media(
                                 item.url,
                                 item.format,
@@ -329,6 +377,8 @@ class QueueManager:
                                 end_time=item.end_time,
                                 preset=item.preset,
                                 social_bypass=item.social_bypass,
+                                search_query=item.search_query,
+                                music_metadata=music_metadata,
                             )
                             if cancel_event and cancel_event.is_set():
                                 if job_id in self._pause_requests:
@@ -347,12 +397,40 @@ class QueueManager:
                             # Move completed file into configured save_dir with clean filename
                             os.makedirs(self.save_dir, exist_ok=True)
                             ext = os.path.splitext(filepath)[1].lstrip(".") or item.format
-                            clean_name = safe_filename(item.title or "download", ext)
-                            dest_path = os.path.join(self.save_dir, clean_name)
+                            is_audio = ext.lower() in ("mp3", "m4a", "opus") or (
+                                ext.lower() == "flac" and item.preset == "audio_lossless"
+                            )
+                            if is_audio:
+                                clean_name = format_audio_filename(
+                                    self.audio_filename_template,
+                                    {
+                                        "title": item.title or "download",
+                                        "artist": item.artist,
+                                        "album": item.album,
+                                        "track_number": item.track_number,
+                                    },
+                                    ext,
+                                    playlist=bool(item.playlist_title),
+                                )
+                            else:
+                                clean_name = safe_filename(item.title or "download", ext)
+
+                            target_dir = self.save_dir
+                            if item.playlist_title and item.save_in_subfolder:
+                                candidate = os.path.realpath(
+                                    os.path.join(
+                                        self.save_dir,
+                                        sanitize_name(item.playlist_title) or "Playlist",
+                                    )
+                                )
+                                if is_allowed_path(candidate, self.save_dir):
+                                    target_dir = candidate
+                            os.makedirs(target_dir, exist_ok=True)
+                            dest_path = os.path.join(target_dir, clean_name)
                             base_name, ext_dot = os.path.splitext(clean_name)
                             counter = 1
                             while os.path.exists(dest_path):
-                                dest_path = os.path.join(self.save_dir, f"{base_name} ({counter}){ext_dot}")
+                                dest_path = os.path.join(target_dir, f"{base_name} ({counter}){ext_dot}")
                                 counter += 1
                             shutil.move(filepath, dest_path)
 
@@ -480,4 +558,4 @@ class QueueManager:
             self._subscribers.discard(q)
 
 
-queue_mgr = QueueManager(max_concurrent=2)
+queue_mgr = QueueManager(max_concurrent=3)

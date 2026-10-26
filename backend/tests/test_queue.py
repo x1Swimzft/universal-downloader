@@ -15,6 +15,7 @@ if BACKEND_DIR not in sys.path:
 from app.main import app
 from app.services import queue_manager as queue_module
 from app.services.extractor import (
+    AUDIO_FILENAME_TEMPLATES,
     _build_ydl_opts,
     classify_error,
     diagnostic_message,
@@ -346,6 +347,105 @@ class TestQueueLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(item.error_code)
 
 
+class TestQueueDefaults(unittest.TestCase):
+    def test_default_concurrency_is_three(self):
+        self.assertEqual(QueueManager().max_concurrent, 3)
+
+
+class TestQueueAudioDestinations(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="ud_queue_audio_")
+        self.tmp_patch = unittest.mock.patch.object(
+            queue_module, "TMP_DIR", self.temp_dir
+        )
+        self.tmp_patch.start()
+        self.history_patch = unittest.mock.patch.object(queue_module.history_store, "add")
+        self.history_patch.start()
+        self.queue = QueueManager()
+        self.queue.save_dir = self.temp_dir
+        self.calls = []
+
+    def tearDown(self):
+        self.history_patch.stop()
+        self.tmp_patch.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def add_audio_item(self, **overrides):
+        values = {
+            "id": "job-audio",
+            "url": "https://open.spotify.com/track/abc",
+            "format": "mp3",
+            "quality": "320",
+            "title": "Song",
+            "artist": "Artist",
+            "album": "Album",
+            "playlist_title": "Road Trip: 2026",
+            "track_number": 1,
+            "search_query": "Artist - Song official audio",
+            "thumbnail": "https://example.com/cover.jpg",
+        }
+        values.update(overrides)
+        item = QueueItem(**values)
+        self.queue.items[item.id] = item
+        self.queue._cancel_events[item.id] = asyncio.Event()
+        return item
+
+    def fake_download(self, job_id: str):
+        async def fake(*args, **kwargs):
+            self.calls.append(kwargs)
+            path = os.path.join(self.temp_dir, f"{job_id}.mp3")
+            with open(path, "wb") as f:
+                f.write(b"audio")
+            return path, "Matched video title"
+
+        return fake
+
+    async def test_playlist_item_lands_in_sanitized_subfolder(self):
+        item = self.add_audio_item()
+
+        with unittest.mock.patch.object(
+            queue_module, "download_media", side_effect=self.fake_download(item.id)
+        ):
+            await self.queue._worker(item.id)
+
+        expected = os.path.join(
+            self.temp_dir, "Road Trip 2026", "01 - Artist - Song.mp3"
+        )
+        self.assertEqual(item.status, "completed")
+        self.assertEqual(item.filename, expected)
+        self.assertTrue(os.path.exists(expected))
+
+    async def test_save_in_subfolder_false_writes_directly_to_save_dir(self):
+        item = self.add_audio_item(save_in_subfolder=False)
+
+        with unittest.mock.patch.object(
+            queue_module, "download_media", side_effect=self.fake_download(item.id)
+        ):
+            await self.queue._worker(item.id)
+
+        expected = os.path.join(self.temp_dir, "01 - Artist - Song.mp3")
+        self.assertEqual(item.filename, expected)
+        self.assertTrue(os.path.exists(expected))
+        self.assertFalse(os.path.isdir(os.path.join(self.temp_dir, "Road Trip 2026")))
+
+    async def test_music_metadata_and_search_query_reach_download_media(self):
+        item = self.add_audio_item(playlist_title=None, save_in_subfolder=False)
+
+        with unittest.mock.patch.object(
+            queue_module, "download_media", side_effect=self.fake_download(item.id)
+        ):
+            await self.queue._worker(item.id)
+
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0]["search_query"], "Artist - Song official audio")
+        metadata = self.calls[0]["music_metadata"]
+        self.assertEqual(metadata["title"], "Song")
+        self.assertEqual(metadata["artist"], "Artist")
+        self.assertEqual(metadata["album"], "Album")
+        self.assertEqual(metadata["track_number"], 1)
+        self.assertEqual(metadata["thumbnail"], "https://example.com/cover.jpg")
+
+
 class TestQueueApi(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.test_token = "queue-session-token-12345"
@@ -355,6 +455,7 @@ class TestQueueApi(unittest.IsolatedAsyncioTestCase):
         self.old_save_dir = queue_mgr.save_dir
         queue_mgr.save_dir = tempfile.mkdtemp(prefix="ud_queue_api_")
         self.old_max_concurrent = queue_mgr.max_concurrent
+        self.old_audio_filename_template = queue_mgr.audio_filename_template
         self.old_items = queue_mgr.items
         self.old_events = queue_mgr._cancel_events
         self.old_tasks = queue_mgr._worker_tasks
@@ -370,6 +471,7 @@ class TestQueueApi(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(queue_mgr.save_dir, ignore_errors=True)
         queue_mgr.save_dir = self.old_save_dir
         queue_mgr.max_concurrent = self.old_max_concurrent
+        queue_mgr.audio_filename_template = self.old_audio_filename_template
         queue_mgr._semaphore = asyncio.Semaphore(self.old_max_concurrent)
         queue_mgr.items = self.old_items
         queue_mgr._cancel_events = self.old_events
@@ -442,6 +544,39 @@ class TestQueueApi(unittest.IsolatedAsyncioTestCase):
                         headers=headers,
                     )
                     self.assertEqual(r_bad.status_code, 400)
+
+    async def test_audio_filename_template_roundtrip_and_validation(self):
+        transport = httpx.ASGITransport(app=app)
+        headers = {"X-App-Token": self.test_token}
+        queue_mgr.audio_filename_template = "{artist} - {title}"
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1:8000"
+        ) as client:
+            r_default = await client.get("/api/settings")
+            self.assertEqual(r_default.status_code, 200)
+            self.assertEqual(
+                r_default.json()["audio_filename_template"], "{artist} - {title}"
+            )
+
+            chosen = AUDIO_FILENAME_TEMPLATES[3]
+            r_ok = await client.post(
+                "/api/settings",
+                json={"audio_filename_template": chosen},
+                headers=headers,
+            )
+            self.assertEqual(r_ok.status_code, 200)
+            self.assertEqual(r_ok.json()["audio_filename_template"], chosen)
+
+            r_get = await client.get("/api/settings")
+            self.assertEqual(r_get.json()["audio_filename_template"], chosen)
+
+            r_bad = await client.post(
+                "/api/settings",
+                json={"audio_filename_template": "{unknown}"},
+                headers=headers,
+            )
+            self.assertEqual(r_bad.status_code, 400)
+            self.assertEqual(queue_mgr.audio_filename_template, chosen)
 
 
 if __name__ == "__main__":

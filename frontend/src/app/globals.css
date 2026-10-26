@@ -1046,10 +1046,25 @@ button.chip svg.i {
 }
 
 .pitem .pmeta {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.plist-subfolder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--text2);
+  font-size: 13.5px;
 }
 
 .plist-actions {

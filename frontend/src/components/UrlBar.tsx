@@ -3,11 +3,20 @@ import { Icon } from "./Icons";
 
 const PLATFORMS = [
   "YouTube",
+  "Spotify",
+  "Apple Music",
   "TikTok",
   "Instagram",
   "X",
   "Facebook",
+  "Twitch",
+  "Kick",
+  "Bilibili",
+  "Reddit",
+  "Pinterest",
+  "Vimeo",
   "SoundCloud",
+  "Bandcamp",
 ] as const;
 
 export interface UrlBarProps {

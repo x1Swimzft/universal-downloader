@@ -11,11 +11,31 @@ export function getApiBase(): string {
 export type DownloadFormat = "mp4" | "mp3" | "m4a" | "opus" | "images";
 export type CookieBrowser = "none" | "chrome" | "edge" | "brave" | "firefox";
 
+export type AudioFilenameTemplate =
+  | "{track} - {artist} - {title}"
+  | "{artist} - {title}"
+  | "{title} ({artist})"
+  | "{title}";
+
+export const AUDIO_FILENAME_TEMPLATES: AudioFilenameTemplate[] = [
+  "{track} - {artist} - {title}",
+  "{artist} - {title}",
+  "{title} ({artist})",
+  "{title}",
+];
+
 export interface DownloadOptions {
   startTime?: string;
   endTime?: string;
   preset?: string;
   socialBypass?: boolean;
+  artist?: string;
+  album?: string;
+  trackNumber?: number;
+  playlistTitle?: string;
+  searchQuery?: string;
+  thumbnail?: string;
+  saveInSubfolder?: boolean;
 }
 
 export interface ExtractorStatus {
@@ -50,6 +70,10 @@ export interface PreviewEntry {
   thumbnail?: string;
   platform?: string;
   media_type: string;
+  artist?: string;
+  album?: string;
+  track_number?: number;
+  search_query?: string;
 }
 
 export interface MediaInfo {
@@ -62,6 +86,10 @@ export interface MediaInfo {
   images?: string[];
   entries?: PreviewEntry[];
   media_type: "video" | "image" | "carousel" | "playlist";
+  artist?: string;
+  album?: string;
+  track_number?: number;
+  search_query?: string;
 }
 
 export interface JobStatus {
@@ -97,6 +125,7 @@ export interface AppSettings {
   minimizeToTray: boolean;
   notifyWhenFinished: boolean;
   maxConcurrent: 1 | 2 | 3 | 4 | 5;
+  audioFilenameTemplate: AudioFilenameTemplate;
   saveFolder: string;
   theme: "light" | "dark";
   cookiesFromBrowser: CookieBrowser;
@@ -213,6 +242,13 @@ function downloadPayload(
     end_time: options?.endTime || null,
     preset: options?.preset || null,
     social_bypass: Boolean(options?.socialBypass),
+    artist: options?.artist || null,
+    album: options?.album || null,
+    track_number: options?.trackNumber ?? null,
+    playlist_title: options?.playlistTitle || null,
+    search_query: options?.searchQuery || null,
+    thumbnail: options?.thumbnail || null,
+    save_in_subfolder: options?.saveInSubfolder ?? true,
   };
 }
 
@@ -391,7 +427,8 @@ export const DEFAULT_FALLBACK_SETTINGS: AppSettings = {
   autoDetectClipboard: true,
   minimizeToTray: true,
   notifyWhenFinished: true,
-  maxConcurrent: 2,
+  maxConcurrent: 3,
+  audioFilenameTemplate: "{artist} - {title}",
   saveFolder: "Downloads\\Universal Downloader",
   theme: "dark",
   cookiesFromBrowser: "none",
@@ -413,7 +450,12 @@ export async function getAppSettings(): Promise<AppSettings> {
       const data = await res.json();
       return {
         ...DEFAULT_FALLBACK_SETTINGS,
-        maxConcurrent: data.max_concurrent || 2,
+        maxConcurrent: data.max_concurrent || 3,
+        audioFilenameTemplate: AUDIO_FILENAME_TEMPLATES.includes(
+          data.audio_filename_template
+        )
+          ? data.audio_filename_template
+          : DEFAULT_FALLBACK_SETTINGS.audioFilenameTemplate,
         saveFolder: data.save_folder || DEFAULT_FALLBACK_SETTINGS.saveFolder,
         cookiesFromBrowser: data.cookies_from_browser || "none",
         cookiesFile: data.cookies_file || "",
@@ -438,6 +480,7 @@ export async function updateAppSettings(patch: Partial<AppSettings>): Promise<Ap
       max_concurrent: patch.maxConcurrent,
       cookies_from_browser: patch.cookiesFromBrowser,
       cookies_file: patch.cookiesFile,
+      audio_filename_template: patch.audioFilenameTemplate,
     }),
   }).catch(() => {});
   return { ...DEFAULT_FALLBACK_SETTINGS, ...patch };
