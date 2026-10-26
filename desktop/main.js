@@ -656,6 +656,7 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
   loadSettings();
   registerIpcHandlers();
   const { backendPort, frontendPort } = await startServices();
@@ -667,7 +668,6 @@ app.whenReady().then(async () => {
     minHeight: 620,
     title: "Universal Downloader",
     icon: APP_ICON_PATH,
-    autoHideMenuBar: true,
     backgroundColor: "#0a0a0f",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -675,6 +675,9 @@ app.whenReady().then(async () => {
       contextIsolation: true,
     },
   });
+
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.removeMenu();
 
   mainWindow.loadURL(
     `http://localhost:${frontendPort}?api_port=${backendPort}&token=${appSessionToken}`
