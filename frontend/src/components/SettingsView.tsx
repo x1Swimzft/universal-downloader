@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import {
   AppSettings,
+  checkForAppUpdate,
   CookieBrowser,
   ExtractorStatus,
   getExtractorStatus,
+  UpdateCheckResult,
   updateExtractor,
 } from "../lib/api";
 import { SettingRow } from "./SettingRow";
@@ -107,6 +109,8 @@ export function SettingsView({
   const [extractor, setExtractor] = useState<ExtractorStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState("");
+  const [appUpdate, setAppUpdate] = useState<UpdateCheckResult | null>(null);
+  const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +142,20 @@ export function SettingsView({
       );
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleCheckForAppUpdate = async () => {
+    setCheckingAppUpdate(true);
+    try {
+      setAppUpdate(await checkForAppUpdate());
+    } catch {
+      setAppUpdate({
+        status: "error",
+        message: "Could not check for updates. Try again later.",
+      });
+    } finally {
+      setCheckingAppUpdate(false);
     }
   };
 
@@ -236,6 +254,24 @@ export function SettingsView({
             ariaLabel="Reduce glass blur and motion"
           />
         </SettingRow>
+      </div>
+      <div className="group" aria-label="App updates">
+        <SettingRow
+          title="App updates"
+          subtitle="Universal Downloader v0.6.0"
+        >
+          <button
+            type="button"
+            className="btn sm"
+            onClick={handleCheckForAppUpdate}
+            disabled={checkingAppUpdate}
+          >
+            {checkingAppUpdate ? "Checking…" : "Check for updates"}
+          </button>
+        </SettingRow>
+        <div className="settings-note" aria-live="polite">
+          {appUpdate?.message || ""}
+        </div>
       </div>
       <div className="group">
         <SettingRow

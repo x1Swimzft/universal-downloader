@@ -347,7 +347,7 @@ function waitForServer(url, timeoutMs = 25000) {
     };
     const retry = () => {
       if (Date.now() - start > timeoutMs) return resolve(false);
-      setTimeout(check, 400);
+      setTimeout(check, 100);
     };
     check();
   });
@@ -529,6 +529,60 @@ function updateTrayMenu() {
 function registerIpcHandlers() {
   ipcMain.handle("app:token", () => {
     return appSessionToken;
+  });
+
+  ipcMain.handle("app:check-update", async () => {
+    const currentVersion = app.getVersion();
+    if (!app.isPackaged || !autoUpdater) {
+      return {
+        status: "unavailable",
+        version: currentVersion,
+        message: "Update checks are available in the installed desktop app.",
+      };
+    }
+    let timeoutId = null;
+    try {
+      autoUpdater.autoDownload = false;
+      const result = await Promise.race([
+        autoUpdater.checkForUpdates(),
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error("Update check timed out")),
+            15000
+          );
+        }),
+      ]);
+      const latest = result && result.updateInfo && result.updateInfo.version;
+      if (latest && latest !== currentVersion) {
+        return {
+          status: "available",
+          version: latest,
+          message: `Version ${latest} is available on GitHub Releases.`,
+        };
+      }
+      return {
+        status: "up-to-date",
+        version: currentVersion,
+        message: "You are on the latest version.",
+      };
+    } catch (error) {
+      const text = String((error && error.message) || error || "");
+      if (/404|not found|latest\.yml|no published/i.test(text)) {
+        return {
+          status: "up-to-date",
+          version: currentVersion,
+          message:
+            "No published release found yet. You are on the latest version.",
+        };
+      }
+      return {
+        status: "error",
+        version: currentVersion,
+        message: "Could not check for updates. Try again later.",
+      };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   });
 
   ipcMain.handle("settings:get", () => {

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openFolder: (targetPath) => ipcRenderer.invoke("shell:open-folder", targetPath),
   notify: (title, body) => ipcRenderer.invoke("notification:show", { title, body }),
   startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath),
+  checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
   onSettingsUpdated: (callback) => {
     const handler = (_event, updated) => callback(updated);
     ipcRenderer.on("settings:changed", handler);

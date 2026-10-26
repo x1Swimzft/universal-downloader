@@ -3,7 +3,7 @@
 Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), TikTok (No Watermark), Instagram Reels, Facebook, Twitter/X, and SoundCloud.
 
 ![Universal Downloader](https://img.shields.io/badge/Platform-Windows%2011-blue?logo=windows)
-![Version](https://img.shields.io/badge/Release-v0.5.0-green)
+![Version](https://img.shields.io/badge/Release-v0.6.0-green)
 ![Electron](https://img.shields.io/badge/Electron-33.4.11-47848F?logo=electron)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi)
 ![Next.js](https://img.shields.io/badge/Next.js-14.2.35-black?logo=nextdotjs)
@@ -28,8 +28,8 @@ Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), T
 ## 🚀 Quick Download (Windows 11)
 
 Download the latest pre-packaged standalone release from the [`release/`](release/) directory:
-* **Installer**: `Universal Downloader Setup 0.5.0.exe` (One-click desktop setup)
-* **Portable**: `Universal Downloader-0.5.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
+* **Installer**: `Universal Downloader Setup 0.6.0.exe` (One-click desktop setup)
+* **Portable**: `Universal Downloader-0.6.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
 
 > **No dependencies needed:** Everything (Python engine, FFmpeg, and UI) is completely bundled.
 

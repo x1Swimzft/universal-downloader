@@ -29,6 +29,12 @@ export interface ExtractorStatus {
   message?: string;
 }
 
+export interface UpdateCheckResult {
+  status: "available" | "up-to-date" | "unavailable" | "error";
+  version?: string;
+  message?: string;
+}
+
 export interface FormatOption {
   format_id: string;
   ext: string;
@@ -125,6 +131,7 @@ declare global {
       openFolder: (targetPath?: string) => Promise<{ opened: string }>;
       notify: (title: string, body?: string) => Promise<boolean>;
       startDrag: (filePath: string) => Promise<boolean>;
+      checkForUpdate: () => Promise<UpdateCheckResult>;
       onSettingsUpdated: (cb: (updated: AppSettings) => void) => () => void;
       getAppToken: () => Promise<string>;
     };
@@ -476,6 +483,17 @@ export async function updateExtractor(): Promise<ExtractorStatus> {
     throw new Error(err.detail || "Extractor update failed");
   }
   return res.json();
+}
+
+export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
+  if (typeof window !== "undefined" && window.electronAPI?.checkForUpdate) {
+    return window.electronAPI.checkForUpdate();
+  }
+  return {
+    status: "unavailable",
+    version: "0.6.0",
+    message: "Update checks are available in the installed desktop app.",
+  };
 }
 
 export async function startDragFile(filePath: string): Promise<boolean> {

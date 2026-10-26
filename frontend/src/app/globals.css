@@ -1381,6 +1381,10 @@ button.chip svg.i {
   font-size: 13px;
 }
 
+.settings-note:empty {
+  display: none;
+}
+
 select {
   height: 40px;
   padding: 0 30px 0 12px;

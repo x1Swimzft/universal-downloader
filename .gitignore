@@ -6,6 +6,7 @@ __pycache__/
 env/
 venv/
 *.spec
+!backend/backend-engine.spec
 
 # Build & Release Artifacts
 build/
