@@ -86,11 +86,12 @@
 
 html,
 body {
+  height: 100%;
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font: 400 13px/1.5 Inter, "Segoe UI", system-ui, sans-serif;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 button,
@@ -131,7 +132,9 @@ svg.i {
 .app {
   position: relative;
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   isolation: isolate;
   background: var(--bg);
 }
@@ -152,6 +155,8 @@ svg.i {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -308,8 +313,39 @@ svg.i {
 /* Content */
 main {
   flex: 1;
+  height: 100vh;
+  height: 100dvh;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px 24px 32px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+main::-webkit-scrollbar {
+  width: 10px;
+}
+
+main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+main::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+  background: var(--border);
+  background-clip: padding-box;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: padding-box;
+}
+
+main::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .wrap {
@@ -1299,9 +1335,11 @@ select {
     position: static;
     width: auto;
     height: auto;
+    flex: none;
     flex-direction: row;
     align-items: center;
     overflow-x: auto;
+    overflow-y: hidden;
     border-right: 0;
     border-bottom: 1px solid var(--border);
     padding: 8px;
@@ -1323,6 +1361,9 @@ select {
   }
 
   main {
+    flex: 1;
+    height: auto;
+    min-height: 0;
     padding: 16px;
   }
 
