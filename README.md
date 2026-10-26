@@ -20,7 +20,7 @@
     <a href="https://github.com/x1Swimzft/universal-downloader/releases">
       <img alt="Releases" src="https://img.shields.io/badge/Releases-Windows%20builds-ff3d5a?style=for-the-badge" />
     </a>
-    <a href="#build-from-source">
+    <a href="#user-content--build-from-source">
       <img alt="Build from source" src="https://img.shields.io/badge/Build-from%20source-111827?style=for-the-badge" />
     </a>
   </p>
@@ -111,7 +111,7 @@ Extract the `Universal Downloader-*-win.zip` archive and run `Universal Download
 Everything needed at runtime — the Python engine, FFmpeg, and static UI — is bundled.
 
 > v0.7.0 artifacts are generated locally with `npm run dist`. See
-> [Build from source](#build-from-source) for the full release pipeline.
+> [Build from source](#user-content--build-from-source) for the full release pipeline.
 
 ---
 
