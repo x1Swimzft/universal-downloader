@@ -13,6 +13,7 @@ import {
   AppearanceSettings,
   Density,
   ThemeMode,
+  UiScale,
 } from "../lib/appearance";
 
 export interface SettingsViewProps {
@@ -43,6 +44,12 @@ const ACCENT_OPTIONS: Array<{ value: AccentColor; label: string }> = [
   { value: "amber", label: "Amber" },
 ];
 
+const SCALE_OPTIONS: SegmentOption[] = [
+  { value: "100", label: "100%" },
+  { value: "115", label: "115%" },
+  { value: "125", label: "125%" },
+];
+
 function Segmented({
   label,
   options,
@@ -63,7 +70,7 @@ function Segmented({
   const style = {
     "--seg-count": options.length,
     "--seg-index": index,
-    maxWidth: wide ? 300 : 230,
+    maxWidth: wide ? 270 : 200,
   } as React.CSSProperties;
 
   return (
@@ -153,7 +160,7 @@ export function SettingsView({
       <div className="group appearance-group" aria-label="Appearance">
         <SettingRow
           title="Theme"
-          subtitle="Dark, light, or follow the Windows setting"
+          subtitle="Dark, light, or follow Windows"
         >
           <Segmented
             label="Theme"
@@ -186,6 +193,20 @@ export function SettingsView({
               </button>
             ))}
           </div>
+        </SettingRow>
+
+        <SettingRow
+          title="UI scale"
+          subtitle="115% recommended for 1080p+"
+        >
+          <Segmented
+            label="UI scale"
+            options={SCALE_OPTIONS}
+            value={appearance.scale}
+            onChange={(scale) =>
+              onUpdateAppearance({ scale: scale as UiScale })
+            }
+          />
         </SettingRow>
 
         <SettingRow

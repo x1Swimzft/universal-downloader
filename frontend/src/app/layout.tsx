@@ -22,6 +22,7 @@ const appearanceInit = `(() => {
     root.dataset.accent = ["crimson", "violet", "cyan", "emerald", "amber"].includes(saved.accent) ? saved.accent : "crimson";
     root.dataset.density = saved.density === "compact" ? "compact" : "comfortable";
     root.dataset.reduceEffects = saved.reduceEffects === true ? "true" : "false";
+    root.dataset.scale = ["100", "115", "125"].includes(saved.scale) ? saved.scale : "115";
     root.style.colorScheme = theme;
   } catch {}
 })();`;
