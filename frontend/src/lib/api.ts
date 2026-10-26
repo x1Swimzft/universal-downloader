@@ -269,6 +269,43 @@ export async function cancelQueueItem(jobId: string): Promise<void> {
   }
 }
 
+export async function fetchHistory(): Promise<HistoryItem[]> {
+  try {
+    const res = await fetch(`${getApiBase()}/api/history`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.items) ? data.items : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteHistoryItem(id: string): Promise<void> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${getApiBase()}/api/history/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to delete history item");
+  }
+}
+
+export async function clearHistory(): Promise<number> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${getApiBase()}/api/history`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to clear history");
+  }
+  const data = await res.json().catch(() => ({}));
+  return typeof data.cleared === "number" ? data.cleared : 0;
+}
+
 export function getQueueStreamUrl(): string {
   return `${getApiBase()}/api/queue/stream`;
 }

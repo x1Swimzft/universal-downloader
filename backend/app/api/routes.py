@@ -30,6 +30,7 @@ from app.services.extractor import (
     get_cookie_preferences,
 )
 from app.services.extractor_update import get_extractor_status, update_extractor
+from app.services.history_store import history_store
 from app.services.queue_manager import (
     queue_mgr,
     is_allowed_path,
@@ -304,6 +305,23 @@ async def get_queue_stream():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+@router.get("/history")
+async def get_history():
+    return {"items": history_store.list()}
+
+
+@router.delete("/history/{item_id}")
+async def delete_history_item(item_id: str):
+    if not history_store.delete(item_id):
+        raise HTTPException(status_code=404, detail="History item not found")
+    return {"deleted": True, "id": item_id}
+
+
+@router.delete("/history")
+async def clear_history():
+    return {"cleared": history_store.clear()}
 
 
 @router.get("/settings")

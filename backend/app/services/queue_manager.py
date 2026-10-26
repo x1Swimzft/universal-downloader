@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import uuid
 import shutil
 import asyncio
@@ -8,6 +9,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Set
 
 from app.services.extractor import download_media, _extract_platform
+from app.services.history_store import history_store
 
 TMP_DIR = os.environ.get("TMP_DIR", os.path.join(os.path.dirname(__file__), "../../tmp"))
 DEFAULT_SAVE_DIR = os.path.join(os.path.expanduser("~"), "Downloads", "Universal Downloader")
@@ -280,6 +282,27 @@ class QueueManager:
             item.speed = 0.0
             item.filename = dest_path
             item.error = None
+
+            try:
+                history_store.add(
+                    {
+                        "id": item.id,
+                        "url": item.url,
+                        "title": item.title,
+                        "format": item.format,
+                        "quality": item.quality,
+                        "platform": item.platform,
+                        "filename": item.filename,
+                        "completedAt": int(time.time() * 1000),
+                        "start_time": item.start_time,
+                        "end_time": item.end_time,
+                        "preset": item.preset,
+                        "social_bypass": item.social_bypass,
+                    }
+                )
+            except Exception:
+                # History is best-effort and must not turn a finished download into an error.
+                pass
 
             if self.external_task_store is not None:
                 self.external_task_store[job_id] = {

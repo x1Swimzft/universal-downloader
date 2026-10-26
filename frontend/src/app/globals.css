@@ -1392,6 +1392,50 @@ select {
   gap: 6px;
 }
 
+/* History toolbar */
+.hist-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.hist-search {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.hist-search::placeholder {
+  color: var(--muted);
+}
+
+.hist-search:focus-visible {
+  border-color: var(--accent-dim-border);
+  box-shadow: 0 0 0 3px var(--glow-soft);
+  outline: 2px solid var(--accent-light);
+  outline-offset: 1px;
+}
+
+.hist-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.hist-empty {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 /* Loading skeleton */
 .sk {
   display: flex;

@@ -5,6 +5,8 @@ import {
   fetchInfo,
   enqueueDownload,
   cancelQueueItem,
+  deleteHistoryItem,
+  clearHistory,
   getQueueStreamUrl,
   getAppSettings,
   updateAppSettings,
@@ -343,6 +345,26 @@ export default function Home() {
     } catch {}
   };
 
+  const handleDeleteHistoryItem = (item: HistoryItem) => {
+    // Keep the id in completedIdsRef so a queue SSE broadcast cannot re-add it.
+    setHistoryItems((prev) => {
+      const updated = prev.filter((entry) => entry.id !== item.id);
+      try {
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    deleteHistoryItem(item.id).catch(() => {});
+  };
+
+  const handleClearHistory = () => {
+    setHistoryItems([]);
+    try {
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify([]));
+    } catch {}
+    clearHistory().catch(() => {});
+  };
+
   const handleOpenFolder = async (filepath?: string) => {
     try {
       await openSaveFolder(filepath);
@@ -499,6 +521,8 @@ export default function Home() {
                 items={historyItems}
                 onOpenFolder={handleOpenFolder}
                 onRedownload={handleRedownload}
+                onDelete={handleDeleteHistoryItem}
+                onClearAll={handleClearHistory}
               />
             </section>
 
