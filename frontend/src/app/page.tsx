@@ -15,6 +15,7 @@ import {
   getQueueStreamUrl,
   getAppSettings,
   updateAppSettings,
+  ApiRequestError,
   pickSaveFolder,
   pickCookiesFile,
   openSaveFolder,
@@ -82,6 +83,21 @@ function parseUrls(value: string): string[] {
   return urls;
 }
 
+const AUTH_FETCH_ERROR_RE =
+  /login|log in|cookie|403|forbidden|rate.?limit|too many requests|could not copy/i;
+
+// Backend auth/cookie errors still arrive as raw extractor text from older builds.
+function friendlyFetchError(message: string): string {
+  if (!AUTH_FETCH_ERROR_RE.test(message)) return message;
+  if (/could not copy|cookie.{0,40}(lock|in use)/i.test(message)) {
+    return "The browser's cookie database is locked. Close Chrome or Edge, then retry, or choose a cookies.txt file in Settings.";
+  }
+  if (/rate.?limit|too many requests/i.test(message)) {
+    return "The site is rate-limiting anonymous requests. Wait a minute, or enable Browser Cookies in Settings.";
+  }
+  return "This link needs a signed-in browser session. Open Settings, choose a browser with your login (or a cookies.txt file), then retry.";
+}
+
 function PreviewSkeleton() {
   return (
     <div className="sk" role="status" aria-label="Loading preview">
@@ -122,6 +138,9 @@ export default function Home() {
   const [detectedPlatform, setDetectedPlatform] = useState("");
   const [loadingInfo, setLoadingInfo] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [fetchErrorAction, setFetchErrorAction] = useState<"open_settings" | "">(
+    ""
+  );
   const [info, setInfo] = useState<MediaInfo | null>(null);
   const [mode, setMode] = useState<"Video" | "Audio">("Video");
   const [selectedOption, setSelectedOption] = useState("1080p");
@@ -258,9 +277,11 @@ export default function Home() {
         setErrorMsg(
           "That doesn't look like a link. Paste a full URL starting with https://"
         );
+        setFetchErrorAction("");
         return;
       }
       setErrorMsg("");
+      setFetchErrorAction("");
       const singlePlatform =
         urls.length === 1 ? detectPlatformName(urls[0]) : "";
       setDetectedPlatform(singlePlatform);
@@ -316,7 +337,16 @@ export default function Home() {
           }
         }
       } catch (e: unknown) {
-        setErrorMsg(e instanceof Error ? e.message : "Failed to fetch link info");
+        const message =
+          e instanceof Error ? e.message : "Failed to fetch link info";
+        const backendAction =
+          e instanceof ApiRequestError ? e.action : undefined;
+        const needsSettings =
+          backendAction === "open_settings" || AUTH_FETCH_ERROR_RE.test(message);
+        setErrorMsg(
+          backendAction === "open_settings" ? message : friendlyFetchError(message)
+        );
+        setFetchErrorAction(needsSettings ? "open_settings" : "");
       } finally {
         setLoadingInfo(false);
       }
@@ -345,6 +375,7 @@ export default function Home() {
     setUrl(val);
     setDetectedPlatform(detectPlatformName(val));
     if (errorMsg) setErrorMsg("");
+    setFetchErrorAction("");
   };
 
   const handlePaste = async () => {
@@ -357,6 +388,7 @@ export default function Home() {
       }
     } catch {
       setErrorMsg("Clipboard access was blocked. Paste with Ctrl+V instead.");
+      setFetchErrorAction("");
     }
   };
 
@@ -369,6 +401,7 @@ export default function Home() {
     if (!info || !url.trim()) return;
     setStartingDownload(true);
     setErrorMsg("");
+    setFetchErrorAction("");
     try {
       const isImagePost =
         info.media_type === "image" || info.media_type === "carousel";
@@ -403,6 +436,7 @@ export default function Home() {
     if (!info || entries.length === 0) return;
     setStartingDownload(true);
     setErrorMsg("");
+    setFetchErrorAction("");
     try {
       const { format, quality } = mapSelectionToFormatQuality(
         mode,
@@ -525,6 +559,16 @@ export default function Home() {
     setActiveView("s");
   };
 
+  const handleOpenCookieSettings = () => {
+    setActiveView("s");
+    requestAnimationFrame(() => {
+      const target = document.getElementById("cookies-source");
+      if (!target) return;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.focus();
+    });
+  };
+
   const handleRedownload = async (item: HistoryItem) => {
     try {
       await enqueueDownload(item.url, item.format, item.quality, item.title, {
@@ -639,6 +683,8 @@ export default function Home() {
                   loading={loadingInfo}
                   detectedPlatform={detectedPlatform}
                   error={errorMsg}
+                  showSettings={fetchErrorAction === "open_settings"}
+                  onOpenSettings={handleOpenCookieSettings}
                 />
 
                 <div className="watch">

@@ -1,7 +1,6 @@
 import uuid
 import asyncio
 import os
-import re
 import shutil
 from typing import Dict, Any, Optional, List
 
@@ -27,6 +26,7 @@ from app.services.extractor import (
     inspect_entries,
     _friendly_error,
     diagnostic_message,
+    error_action,
     download_media,
     format_audio_filename,
     get_direct_stream_url,
@@ -91,9 +91,13 @@ class OpenFolderRequest(BaseModel):
     path: Optional[str] = None
 
 
-def _strip_ansi(text: str) -> str:
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
+def _error_detail(message: str, code: str) -> Dict[str, Any]:
+    """Structured 400 detail so the UI can show a hint and an action."""
+    detail: Dict[str, Any] = {"message": message, "code": code}
+    action = error_action(code)
+    if action:
+        detail["action"] = action
+    return detail
 
 
 def _validate_save_dir(requested_dir: Optional[str]) -> str:
@@ -120,8 +124,11 @@ async def get_info(body: InfoRequest):
         info = await extract_info(body.url)
         return info
     except Exception as e:
-        clean_err = _strip_ansi(str(e))
-        raise HTTPException(status_code=400, detail=clean_err)
+        code, message = diagnostic_message(str(e), body.url)
+        friendly = _friendly_error(str(e), body.url)
+        raise HTTPException(
+            status_code=400, detail=_error_detail(friendly or message, code)
+        )
 
 
 @router.post("/preview")
@@ -151,11 +158,14 @@ async def preview_urls(body: PreviewRequest):
     seen: set[str] = set()
     failed: List[str] = []
     errors: List[str] = []
+    codes: List[str] = []
     for url, result in zip(urls, results):
         if isinstance(result, BaseException):
             failed.append(url)
+            code, message = diagnostic_message(str(result), url)
+            codes.append(code)
             friendly = _friendly_error(str(result), url)
-            errors.append(friendly or diagnostic_message(str(result), url)[1])
+            errors.append(friendly or message)
             continue
         for entry in result:
             if entry["url"] in seen or len(items) >= 100:
@@ -164,8 +174,12 @@ async def preview_urls(body: PreviewRequest):
             items.append(PreviewEntry(**entry))
 
     if not items:
-        detail = " · ".join(dict.fromkeys(errors)) or "Could not inspect any link"
-        raise HTTPException(status_code=400, detail=detail)
+        message = " · ".join(dict.fromkeys(errors)) or "Could not inspect any link"
+        code = next((item for item in codes if error_action(item)), None)
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(message, code or (codes[0] if codes else "UNKNOWN")),
+        )
 
     response: Dict[str, Any] = {"items": items}
     if failed:

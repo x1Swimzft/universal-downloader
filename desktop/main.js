@@ -176,7 +176,7 @@ function persistSettings() {
 }
 
 function syncSettingsToBackend() {
-  if (!activeBackendPort || !settings) return;
+  if (!activeBackendPort || !settings) return Promise.resolve();
   const payload = JSON.stringify({
     max_concurrent: settings.maxConcurrent,
     save_folder: settings.saveFolder,
@@ -184,25 +184,39 @@ function syncSettingsToBackend() {
     cookies_file: settings.cookiesFile,
     audio_filename_template: settings.audioFilenameTemplate,
   });
-  const req = http.request(
-    {
-      hostname: "127.0.0.1",
-      port: activeBackendPort,
-      path: "/api/settings",
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(payload),
-        "X-App-Token": appSessionToken,
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      resolve();
+    };
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: activeBackendPort,
+        path: "/api/settings",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          "X-App-Token": appSessionToken,
+        },
       },
-    },
-    (res) => {
-      res.resume();
-    }
-  );
-  req.on("error", () => {});
-  req.write(payload);
-  req.end();
+      (res) => {
+        res.on("end", finish);
+        res.on("error", finish);
+        res.resume();
+      }
+    );
+    req.on("error", finish);
+    req.setTimeout(2000, () => {
+      req.destroy();
+      finish();
+    });
+    req.write(payload);
+    req.end();
+  });
 }
 
 function isWithinAllowedFolder(targetPath, allowedRoot) {
@@ -490,7 +504,7 @@ async function startServices() {
 
   await waitForServer(`http://127.0.0.1:${backendPort}/docs`);
   await waitForServer(`http://127.0.0.1:${frontendPort}`);
-  syncSettingsToBackend();
+  await syncSettingsToBackend();
   return { backendPort, frontendPort };
 }
 
@@ -601,7 +615,7 @@ function registerIpcHandlers() {
     return settings || loadSettings();
   });
 
-  ipcMain.handle("settings:update", (_event, patch) => {
+  ipcMain.handle("settings:update", async (_event, patch) => {
     if (!patch || typeof patch !== "object") return settings;
     if (typeof patch.autoDetectClipboard === "boolean") {
       settings.autoDetectClipboard = patch.autoDetectClipboard;
@@ -637,7 +651,7 @@ function registerIpcHandlers() {
       settings.quickFetchHotkeyEnabled = patch.quickFetchHotkeyEnabled;
     }
     persistSettings();
-    syncSettingsToBackend();
+    await syncSettingsToBackend();
     updateTrayMenu();
     registerQuickFetchHotkey();
     return settings;
@@ -668,7 +682,7 @@ function registerIpcHandlers() {
     if (!res.canceled && res.filePaths && res.filePaths[0]) {
       settings.cookiesFile = path.resolve(res.filePaths[0]);
       persistSettings();
-      syncSettingsToBackend();
+      await syncSettingsToBackend();
     }
     return settings;
   });

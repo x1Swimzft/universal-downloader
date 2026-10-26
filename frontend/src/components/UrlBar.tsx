@@ -27,6 +27,8 @@ export interface UrlBarProps {
   loading: boolean;
   detectedPlatform: string;
   error: string;
+  onOpenSettings?: () => void;
+  showSettings?: boolean;
 }
 
 export function UrlBar({
@@ -37,6 +39,8 @@ export function UrlBar({
   loading,
   detectedPlatform,
   error,
+  onOpenSettings,
+  showSettings,
 }: UrlBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -131,6 +135,16 @@ export function UrlBar({
             >
               Retry
             </button>
+            {showSettings && onOpenSettings && (
+              <button
+                type="button"
+                className="btn sm"
+                onClick={onOpenSettings}
+                disabled={loading}
+              >
+                Open Settings
+              </button>
+            )}
           </div>
         )}
       </div>

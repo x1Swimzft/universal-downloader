@@ -323,6 +323,7 @@ export function SettingsView({
           subtitle="Use a signed-in browser for private or age-gated posts"
         >
           <select
+            id="cookies-source"
             aria-label="Browser cookies"
             value={settings.cookiesFromBrowser}
             onChange={(event) =>

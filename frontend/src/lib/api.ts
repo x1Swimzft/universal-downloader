@@ -196,6 +196,31 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return token ? { "X-App-Token": token } : {};
 }
 
+export class ApiRequestError extends Error {
+  code?: string;
+  action?: string;
+
+  constructor(message: string, code?: string, action?: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.code = code;
+    this.action = action;
+  }
+}
+
+async function responseError(res: Response, fallback: string): Promise<ApiRequestError> {
+  const data = await res.json().catch(() => ({}));
+  const detail = data?.detail;
+  if (detail && typeof detail === "object") {
+    return new ApiRequestError(
+      typeof detail.message === "string" && detail.message ? detail.message : fallback,
+      typeof detail.code === "string" ? detail.code : undefined,
+      typeof detail.action === "string" ? detail.action : undefined
+    );
+  }
+  return new ApiRequestError(typeof detail === "string" && detail ? detail : fallback);
+}
+
 export async function fetchInfo(url: string): Promise<MediaInfo> {
   const authHeaders = await getAuthHeaders();
   const res = await fetch(`${getApiBase()}/api/info`, {
@@ -203,10 +228,7 @@ export async function fetchInfo(url: string): Promise<MediaInfo> {
     headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ url }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to fetch info");
-  }
+  if (!res.ok) throw await responseError(res, "Failed to fetch info");
   return res.json();
 }
 
@@ -219,10 +241,7 @@ export async function previewUrls(
     headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ urls }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to preview links");
-  }
+  if (!res.ok) throw await responseError(res, "Failed to preview links");
   return res.json();
 }
 

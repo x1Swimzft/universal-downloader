@@ -19,15 +19,22 @@ from app.services.extractor import (
     _collect_images,
     _extract_platform,
     _find_output_file,
+    _flat_info,
     _friendly_error,
     _get_base_opts,
+    _IG_EMBED_UA,
+    _instagram_embed_info,
+    _instagram_shortcode,
     _music_ffmpeg_args,
     _parse_tiktok_photo_html,
     _photo_referer,
     _preset_ffmpeg_args,
     _upgrade_pinterest_image,
     _download_music_cover,
+    classify_error,
+    diagnostic_message,
     download_media,
+    error_action,
     extract_info,
     format_audio_filename,
     inspect_entries,
@@ -993,6 +1000,427 @@ class TestClipAndPresets(unittest.TestCase):
     def test_version_key_orders_releases(self):
         self.assertGreater(_version_key("2026.10.26"), _version_key("2026.8.19"))
         self.assertEqual(_version_key("2026.08.19"), (2026, 8, 19))
+
+
+class TestInstagramEmbedFallback(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        set_cookie_preferences(cookies_from_browser="none", cookies_file="")
+
+    def tearDown(self):
+        set_cookie_preferences(cookies_from_browser="none", cookies_file="")
+
+    def _context_html(self, media):
+        context = {"context": json.dumps({"media": media})}
+        payload = {"contextJSON": json.dumps(context)}
+        return (
+            "<html><head></head><body>"
+            f"<script type=\"application/json\">{json.dumps(payload)}</script>"
+            "</body></html>"
+        )
+
+    async def test_gql_data_object_parses(self):
+        gql = {
+            "graphql": {
+                "shortcode_media": {
+                    "display_url": "https://scontent.cdninstagram.com/v/gql.jpg",
+                    "edge_media_to_caption": {"edges": [{"node": {"text": "GQL post"}}]},
+                    "owner": {"username": "gqluser"},
+                }
+            }
+        }
+        html = (
+            "<html><body><script>"
+            f'window.__additionalDataLoaded("/p/GQL1/", {json.dumps(gql)});'
+            "</script></body></html>"
+        )
+        with _fake_http(
+            {"instagram.com/p/GQL1/embed/captioned": _FakeResponse(html)}
+        ):
+            info = await _instagram_embed_info("https://www.instagram.com/p/GQL1/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "GQL post")
+        self.assertEqual(info.uploader, "gqluser")
+        self.assertEqual(info.images, ["https://scontent.cdninstagram.com/v/gql.jpg"])
+
+    def test_embed_fetch_uses_crawler_user_agent(self):
+        # Browser UAs receive the login shell with no contextJSON.
+        self.assertIn("facebookexternalhit", _IG_EMBED_UA.lower())
+
+    def test_shortcode_parsing(self):
+        self.assertEqual(
+            _instagram_shortcode("https://www.instagram.com/p/ABC123/?img_index=1"),
+            ("p", "ABC123"),
+        )
+        self.assertEqual(
+            _instagram_shortcode("instagram.com/reel/Reel_9/"), ("reel", "Reel_9")
+        )
+        self.assertEqual(
+            _instagram_shortcode("https://www.instagram.com/de/tv/TV42/"),
+            ("tv", "TV42"),
+        )
+        self.assertEqual(
+            _instagram_shortcode("https://instagram.com/reels/abc"), ("reels", "abc")
+        )
+        self.assertIsNone(_instagram_shortcode("https://example.com/p/abc"))
+        self.assertIsNone(_instagram_shortcode("https://notinstagram.com/reel/abc"))
+        self.assertIsNone(_instagram_shortcode("https://www.instagram.com/stories/abc"))
+
+    async def test_context_json_image_post(self):
+        media = {
+            "shortcode_media": {
+                "is_video": False,
+                "display_url": "https://scontent.cdninstagram.com/v/low.jpg",
+                "display_resources": [
+                    {
+                        "src": "https://scontent.cdninstagram.com/v/mid.jpg",
+                        "config_width": 640,
+                        "config_height": 640,
+                    },
+                    {
+                        "src": "https://scontent.cdninstagram.com/v/high.jpg",
+                        "config_width": 1080,
+                        "config_height": 1080,
+                    },
+                ],
+                "edge_media_to_caption": {
+                    "edges": [{"node": {"text": "Golden hour\nSecond line"}}]
+                },
+                "owner": {"username": "shutterbug"},
+            }
+        }
+        html = self._context_html(media)
+        with _fake_http(
+            {"instagram.com/p/ABC123/embed/captioned": _FakeResponse(html)}
+        ):
+            info = await _instagram_embed_info("https://www.instagram.com/p/ABC123/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "Golden hour")
+        self.assertEqual(info.uploader, "shutterbug")
+        self.assertEqual(info.media_type, "image")
+        self.assertEqual(info.images, ["https://scontent.cdninstagram.com/v/high.jpg"])
+        self.assertEqual(info.thumbnail, "https://scontent.cdninstagram.com/v/high.jpg")
+
+    async def test_context_json_carousel(self):
+        media = {
+            "carousel_media": [
+                {
+                    "display_url": "https://scontent.cdninstagram.com/v/one.jpg",
+                    "image_versions2": {
+                        "candidates": [
+                            {
+                                "url": "https://scontent.cdninstagram.com/v/one-big.jpg",
+                                "width": 1080,
+                                "height": 1080,
+                            },
+                            {
+                                "url": "https://scontent.cdninstagram.com/v/one-small.jpg",
+                                "width": 320,
+                                "height": 320,
+                            },
+                        ]
+                    },
+                },
+                {"display_url": "https://scontent.cdninstagram.com/v/two.jpg"},
+            ],
+            "caption": {"text": "Two photos"},
+            "owner": {"username": "two"},
+        }
+        html = self._context_html(media)
+        with _fake_http(
+            {"instagram.com/p/CARO/embed/captioned": _FakeResponse(html)}
+        ):
+            info = await _instagram_embed_info("https://www.instagram.com/p/CARO/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.media_type, "carousel")
+        self.assertEqual(
+            info.images,
+            [
+                "https://scontent.cdninstagram.com/v/one-big.jpg",
+                "https://scontent.cdninstagram.com/v/two.jpg",
+            ],
+        )
+        self.assertEqual(info.title, "Two photos")
+        self.assertEqual(info.uploader, "two")
+
+    async def test_mixed_carousel_prefers_images(self):
+        media = {
+            "carousel_media": [
+                {"display_url": "https://scontent.cdninstagram.com/v/still.jpg"},
+                {
+                    "is_video": True,
+                    "video_url": "https://scontent.cdninstagram.com/v/clip.mp4",
+                    "display_url": "https://scontent.cdninstagram.com/v/poster.jpg",
+                },
+            ]
+        }
+        with _fake_http(
+            {"instagram.com/p/MIXED/embed/captioned": _FakeResponse(self._context_html(media))}
+        ):
+            info = await _instagram_embed_info("https://www.instagram.com/p/MIXED/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.media_type, "carousel")
+        self.assertEqual(
+            info.images, ["https://scontent.cdninstagram.com/v/still.jpg"]
+        )
+
+    async def test_reel_uses_kind_embed_when_canonical_has_no_media(self):
+        media = {
+            "shortcode_media": {
+                "display_url": "https://scontent.cdninstagram.com/v/reel.jpg"
+            }
+        }
+        routes = {
+            "instagram.com/p/REEL1/embed/captioned": _FakeResponse("<html></html>"),
+            "instagram.com/reel/REEL1/embed/captioned": _FakeResponse(
+                self._context_html(media)
+            ),
+        }
+        with _fake_http(routes):
+            info = await _instagram_embed_info("https://www.instagram.com/reel/REEL1/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.images, ["https://scontent.cdninstagram.com/v/reel.jpg"])
+
+    async def test_open_graph_only_fallback(self):
+        html = (
+            "<html><head>"
+            '<meta property="og:title" content="Sunset on Instagram: &quot;Golden hour&quot;">'
+            '<meta property="og:image" content="https://scontent.cdninstagram.com/v/og.jpg">'
+            '<meta property="og:description" content="fallback">'
+            "</head><body></body></html>"
+        )
+        with _fake_http(
+            {"instagram.com/p/OG1/embed/captioned": _FakeResponse(html)}
+        ):
+            info = await _instagram_embed_info("https://www.instagram.com/p/OG1/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.title, "Golden hour")
+        self.assertEqual(info.media_type, "image")
+        self.assertEqual(info.images, ["https://scontent.cdninstagram.com/v/og.jpg"])
+        self.assertEqual(info.thumbnail, "https://scontent.cdninstagram.com/v/og.jpg")
+
+    async def test_video_post_has_thumbnail_but_no_playable_formats(self):
+        media = {
+            "shortcode_media": {
+                "is_video": True,
+                "video_duration": 12.5,
+                "video_url": "https://scontent.cdninstagram.com/v/clip.mp4",
+                "display_url": "https://scontent.cdninstagram.com/v/poster.jpg",
+                "owner": {"username": "filmer"},
+            }
+        }
+        with _fake_http(
+            {"instagram.com/p/VID1/embed/captioned": _FakeResponse(self._context_html(media))}
+        ):
+            info = await _instagram_embed_info("https://www.instagram.com/p/VID1/")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info.media_type, "video")
+        self.assertEqual(info.duration, 12.5)
+        self.assertEqual(info.thumbnail, "https://scontent.cdninstagram.com/v/poster.jpg")
+        self.assertEqual(info.formats, [])
+        self.assertEqual(info.images, [])
+
+    async def test_extract_info_uses_embed_without_cookies(self):
+        fallback = MediaInfo(
+            title="Public post",
+            thumbnail="https://scontent.cdninstagram.com/v/1.jpg",
+            platform="instagram",
+            images=["https://scontent.cdninstagram.com/v/1.jpg"],
+            media_type="image",
+        )
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor, "_instagram_embed_info", AsyncMock(return_value=fallback)
+        ), patch.object(
+            extractor.yt_dlp, "YoutubeDL", MagicMock()
+        ) as ydl:
+            info = await extract_info("https://www.instagram.com/p/PUBLIC/")
+
+        self.assertEqual(info.title, "Public post")
+        self.assertEqual(info.media_type, "image")
+        ydl.assert_not_called()
+
+    async def test_extract_info_embed_fallback_after_login_redirect_with_cookies(self):
+        set_cookie_preferences(cookies_from_browser="chrome")
+        fallback = MediaInfo(
+            title="Locked browser post",
+            thumbnail="https://scontent.cdninstagram.com/v/2.jpg",
+            platform="instagram",
+            images=["https://scontent.cdninstagram.com/v/2.jpg"],
+            media_type="image",
+        )
+        login_error = RuntimeError(
+            "ERROR: The webpage request was redirected to the login page. "
+            "Use --cookies-from-browser or --cookies to access this content."
+        )
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor.yt_dlp, "YoutubeDL", MagicMock(side_effect=login_error)
+        ), patch.object(
+            extractor, "_instagram_embed_info", AsyncMock(return_value=fallback)
+        ) as embed:
+            info = await extract_info("https://www.instagram.com/reel/LOCKED/")
+
+        self.assertEqual(info.title, "Locked browser post")
+        embed.assert_awaited()
+
+    async def test_extract_info_raises_clean_error_when_embed_also_fails(self):
+        login_error = RuntimeError(
+            "ERROR: The webpage request was redirected to the login page. "
+            "Use --cookies-from-browser or --cookies to access this content."
+        )
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor.yt_dlp, "YoutubeDL", MagicMock(side_effect=login_error)
+        ), patch.object(
+            extractor, "_instagram_embed_info", AsyncMock(return_value=None)
+        ):
+            with self.assertRaises(ValueError) as raised:
+                await extract_info("https://www.instagram.com/p/NOPE/")
+
+        message = str(raised.exception)
+        self.assertNotIn("--cookies", message)
+        self.assertIn("Sign-in required", message)
+
+    async def test_inspect_entries_uses_embed_without_cookies(self):
+        fallback = MediaInfo(
+            title="Preview post",
+            thumbnail="https://scontent.cdninstagram.com/v/3.jpg",
+            platform="instagram",
+            images=["https://scontent.cdninstagram.com/v/3.jpg"],
+            media_type="image",
+        )
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor, "_instagram_embed_info", AsyncMock(return_value=fallback)
+        ), patch.object(
+            extractor, "_flat_info", MagicMock()
+        ) as flat:
+            entries = await inspect_entries("https://www.instagram.com/p/PREVIEW/")
+
+        flat.assert_not_called()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["url"], "https://www.instagram.com/p/PREVIEW/")
+        self.assertEqual(entries[0]["title"], "Preview post")
+        self.assertEqual(entries[0]["platform"], "instagram")
+        self.assertEqual(entries[0]["media_type"], "image")
+        self.assertEqual(
+            entries[0]["thumbnail"], "https://scontent.cdninstagram.com/v/3.jpg"
+        )
+
+    async def test_inspect_entries_embed_fallback_after_ytdlp_failure(self):
+        set_cookie_preferences(cookies_from_browser="chrome")
+        fallback = MediaInfo(
+            title="Fallback preview",
+            platform="instagram",
+            images=["https://scontent.cdninstagram.com/v/4.jpg"],
+            media_type="image",
+        )
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(
+            extractor, "_flat_info", MagicMock(side_effect=RuntimeError("login page"))
+        ), patch.object(
+            extractor, "_instagram_embed_info", AsyncMock(return_value=fallback)
+        ):
+            entries = await inspect_entries("https://www.instagram.com/reel/FALL/")
+
+        self.assertEqual(entries[0]["url"], "https://www.instagram.com/reel/FALL/")
+        self.assertEqual(entries[0]["media_type"], "image")
+
+
+class TestCookieOptionInjection(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        set_cookie_preferences(cookies_from_browser="none", cookies_file="")
+
+    def tearDown(self):
+        set_cookie_preferences(cookies_from_browser="none", cookies_file="")
+
+    async def test_cookiefile_reaches_info_flat_and_download_options(self):
+        fd, path = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("# Netscape HTTP Cookie File\n")
+            set_cookie_preferences(cookies_from_browser="none", cookies_file=path)
+            with patch.object(
+                extractor, "validate_url_not_private", return_value=True
+            ), patch.object(extractor.yt_dlp, "YoutubeDL", _FakeYoutubeDL):
+                await extract_info("https://vimeo.com/1")
+                self.assertEqual(
+                    _FakeYoutubeDL.last_opts["cookiefile"], os.path.realpath(path)
+                )
+                self.assertNotIn("cookiesfrombrowser", _FakeYoutubeDL.last_opts)
+
+                _flat_info("https://vimeo.com/1")
+                self.assertEqual(
+                    _FakeYoutubeDL.last_opts["cookiefile"], os.path.realpath(path)
+                )
+
+            opts = _build_ydl_opts(
+                "mp4", "1080", "%(id)s.%(ext)s", lambda _d: None, "https://vimeo.com/1"
+            )
+            self.assertEqual(opts["cookiefile"], os.path.realpath(path))
+        finally:
+            set_cookie_preferences(cookies_from_browser="none", cookies_file="")
+            os.remove(path)
+
+    async def test_browser_cookies_reach_extract_info(self):
+        set_cookie_preferences(cookies_from_browser="edge")
+        with patch.object(
+            extractor, "validate_url_not_private", return_value=True
+        ), patch.object(extractor.yt_dlp, "YoutubeDL", _FakeYoutubeDL):
+            await extract_info("https://vimeo.com/1")
+        self.assertEqual(_FakeYoutubeDL.last_opts["cookiesfrombrowser"], ("edge",))
+        self.assertNotIn("cookiefile", _FakeYoutubeDL.last_opts)
+
+
+class TestErrorSanitization(unittest.TestCase):
+    def test_cookie_lock_messages(self):
+        for message in (
+            "ERROR: Could not copy Chrome cookie database. Permission denied",
+            "ERROR: cookie database is locked",
+            "ERROR: database is locked while reading cookies",
+            "ERROR: Permission denied opening Chrome cookies",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(classify_error(message), "COOKIE_LOCKED")
+                code, user_message = diagnostic_message(message)
+                self.assertEqual(code, "COOKIE_LOCKED")
+                self.assertIn("Close Chrome/Edge", user_message)
+                self.assertEqual(error_action(code), "open_settings")
+
+    def test_plain_permission_denied_is_not_cookie_locked(self):
+        self.assertNotEqual(classify_error("Permission denied"), "COOKIE_LOCKED")
+
+    def test_login_redirect_is_clean_cookie_required(self):
+        message = (
+            "ERROR: The webpage request was redirected to the login page. "
+            "Use --cookies-from-browser or --cookies to access this content."
+        )
+        self.assertEqual(classify_error(message), "COOKIE_REQUIRED")
+        code, user_message = diagnostic_message(message)
+        self.assertEqual(code, "COOKIE_REQUIRED")
+        self.assertNotIn("--cookies", user_message)
+        self.assertIn("Browser Cookies", user_message)
+        self.assertEqual(error_action(code), "open_settings")
+
+    def test_error_actions(self):
+        for code in ("AUTH_403", "COOKIE_REQUIRED", "COOKIE_LOCKED", "RATE_LIMIT"):
+            with self.subTest(code=code):
+                self.assertEqual(error_action(code), "open_settings")
+        self.assertIsNone(error_action("UNSUPPORTED_URL"))
+        self.assertIsNone(error_action("UNKNOWN"))
 
 
 if __name__ == "__main__":
