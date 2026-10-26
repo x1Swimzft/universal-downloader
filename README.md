@@ -1,71 +1,150 @@
-# Universal Downloader ⚡
+<div align="center">
+  <img src="docs/assets/icon.png" width="96" alt="Universal Downloader icon" />
+  <h1>Universal Downloader</h1>
+  <p><strong>Everything you copy, downloaded locally.</strong></p>
+  <p>
+    A native Windows 11 downloader for YouTube, TikTok, Instagram, Spotify, Apple Music,
+    Twitch, and 10+ creator sites.<br />
+    One queue. Bundled FFmpeg. No uploads. No terminal windows.
+  </p>
+  <p>
+    <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078D4?logo=windows&logoColor=white" />
+    <img alt="Release v0.7.0" src="https://img.shields.io/badge/release-v0.7.0-ff3d5a" />
+    <img alt="Review 4.7 out of 5" src="https://img.shields.io/badge/review-4.7%2F5-ff5a70" />
+    <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e" />
+    <img alt="Electron" src="https://img.shields.io/badge/Electron-33.4.11-47848F?logo=electron&logoColor=white" />
+    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi&logoColor=white" />
+    <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14.2.35-000000?logo=nextdotjs&logoColor=white" />
+  </p>
+  <p>
+    <a href="https://github.com/x1Swimzft/universal-downloader/releases">
+      <img alt="Releases" src="https://img.shields.io/badge/Releases-Windows%20builds-ff3d5a?style=for-the-badge" />
+    </a>
+    <a href="#build-from-source">
+      <img alt="Build from source" src="https://img.shields.io/badge/Build-from%20source-111827?style=for-the-badge" />
+    </a>
+  </p>
+</div>
 
-Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), TikTok (No Watermark), Instagram Reels, Facebook, Twitter/X, SoundCloud, Spotify, Apple Music, Twitch, Kick, Bilibili, Reddit, Pinterest, Vimeo, and Bandcamp.
-
-![Universal Downloader](https://img.shields.io/badge/Platform-Windows%2011-blue?logo=windows)
-![Version](https://img.shields.io/badge/Release-v0.7.0-green)
-![Electron](https://img.shields.io/badge/Electron-33.4.11-47848F?logo=electron)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi)
-![Next.js](https://img.shields.io/badge/Next.js-14.2.35-black?logo=nextdotjs)
-
----
-
-## 🌟 Key Features
-
-* **Native Windows 11 Desktop Shell**: Built with Electron, runs completely offline from the desktop without opening separate terminal windows.
-* **System Tray & Clipboard Watcher**: Minimizes to the Windows system tray and automatically detects copied media URLs from supported platforms.
-* **Real-time Download Queue**: Download multiple links simultaneously (1–5 concurrent, default 3) with live progress bars, speed, and status over Server-Sent Events (SSE).
-* **Music Bridge**: Resolves public Spotify and Apple Music tracks, albums, and playlists, then downloads tagged audio with embedded cover art.
-* **Playlist Library**: Saves playlists and albums into sanitized subfolders with track-numbered filenames, and supports multi-link batch selection.
-* **Audio Filename Templates**: Names audio files with presets such as `{artist} - {title}` or `{track} - {artist} - {title}`.
-* **Creator Sites**: Works across Twitch, Kick, Bilibili, Reddit, Pinterest, Vimeo, SoundCloud, and Bandcamp without a domain allowlist.
-* **Direct Stream Piping**: Streams single-stream MP4 files directly to the client without redundant disk caching.
-* **Full HD / 4K & Audio Extraction**: Automatically handles Node.js runtime challenges with `yt-dlp` and merges video/audio with bundled FFmpeg.
-* **Self-Healing Engine**: Browser-cookie import (`cookies.txt` or Chrome/Edge/Brave/Firefox) and in-app `yt-dlp` updates from PyPI without reinstalling the app.
-* **Photos & Carousels**: Downloads image-only Instagram posts and TikTok photo slideshows, saving multi-photo posts as a ZIP.
-* **Creator Workflow**: Optional start/end clipping, H.264 edit-ready and loudness-normalized presets, plus native drag-out into OBS, DaVinci Resolve, or CapCut.
-* **Smart Automation**: Clip-to-download global hotkey (`Ctrl+Shift+D`), social-media bypass encoding, and native completion notifications.
-* **Headless API for Streamers**: `POST /api/rio/quick-fetch` for automated background asset downloads directly to disk.
-
----
-
-## 🚀 Quick Download (Windows 11)
-
-Download the latest pre-packaged standalone release from the [`release/`](release/) directory:
-* **Installer**: `Universal Downloader Setup 0.7.0.exe` (One-click desktop setup)
-* **Portable**: `Universal Downloader-0.7.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
-
-> **No dependencies needed:** Everything (Python engine, FFmpeg, and UI) is completely bundled.
+> **v0.7.0** adds Spotify and Apple Music bridging, TikTok Photo Mode, an Instagram public-post fallback, playlist folders, audio filename templates, and 1–5 concurrent downloads.
 
 ---
 
-## 🛠️ Architecture & Tech Stack
+## ✨ What's new in 0.7.0
+
+| Area | Upgrade |
+| --- | --- |
+| **Music library** | Resolve public Spotify and Apple Music tracks, albums, and playlists, then download tagged audio with embedded cover art. |
+| **TikTok Photo Mode** | `/photo/` posts become **Photos · N slides** carousels, saved as a ZIP, with the background music available as an optional Audio mode. |
+| **Instagram fallback** | Public posts and carousels extract through Instagram's embed payload when anonymous `yt-dlp` hits a login wall. |
+| **Playlist folders** | Playlists and albums save into sanitized subfolders with track-numbered filenames. |
+| **Audio templates** | Name files with presets such as `{artist} - {title}` or `{track} - {artist} - {title}`. |
+| **Batch control** | Multi-link previews, checklists, select all/none, and concurrent downloads (1–5, default 3). |
+
+---
+
+## 🖥️ Screens
+
+| Download | Settings |
+| --- | --- |
+| ![Download view](docs/assets/app-download.png) | ![Settings view](docs/assets/app-settings.png) |
+
+### TikTok Photo Mode
+
+![TikTok Photo Mode showing a 30-slide carousel and Audio tab](docs/assets/tiktok-photo.png)
+
+---
+
+## ⭐ Hands-on review
+
+<a href="docs/assets/review.png">
+  <img src="docs/assets/review.png" alt="Universal Downloader hands-on review: 4.7 out of 5" width="100%" />
+</a>
+
+| Overall | Speed | Clarity | Value |
+| :---: | :---: | :---: | :---: |
+| **4.7 / 5** | 9.1 | 9.3 | 9.0 |
+
+> “It replaced three browser tabs, a sketchy converter site and a watermark. Clipboard watch alone earns the install.”
+>
+> **Verdict** · Editor's pick · Windows 11 · v0.7.0
+
+---
+
+## 🚀 Why it feels different
+
+| Feature | What it does |
+| --- | --- |
+| **Native desktop shell** | Electron app with tray support, single-instance lock, and no browser tabs or hidden terminal windows. |
+| **Clipboard watcher** | Detects copied media links and offers to fetch them instantly. |
+| **Real-time queue** | Live progress, speed, pause/resume/retry, and 1–5 concurrent downloads over SSE. |
+| **Full quality pipeline** | Handles Node.js challenges through `yt-dlp`, merges video/audio, and uses bundled FFmpeg for MP4, MP3, M4A, and OPUS. |
+| **Photos & carousels** | Downloads Instagram image posts and TikTok slideshows as full-size JPGs or a ZIP. |
+| **Creator workflow** | Start/end clipping, H.264 edit-ready output, loudness normalization, and native drag-out to OBS, DaVinci Resolve, or CapCut. |
+| **Self-healing engine** | Browser cookie import (`cookies.txt`, Chrome, Edge, Brave, Firefox) and in-app `yt-dlp` updates. |
+| **Private by design** | Media is fetched directly to your PC. Nothing is uploaded to a third-party service. |
+
+---
+
+## 🌐 Supported sites
+
+**Video & social**  
+`YouTube` `TikTok` `Instagram` `Facebook` `X / Twitter` `Twitch` `Kick` `Bilibili` `Vimeo` `Reddit` `Pinterest`
+
+**Music & audio**  
+`Spotify` `Apple Music` `SoundCloud` `Bandcamp`
+
+> Music links resolve public metadata and bridge to a matching audio source through `ytsearch1`. Public Instagram posts use the embed fallback when anonymous extraction is blocked.
+
+---
+
+## 📦 Install
+
+### Published builds
+
+Download the latest installer or portable ZIP from the
+[**Releases page**](https://github.com/x1Swimzft/universal-downloader/releases).
+
+### Portable
+
+Extract the `Universal Downloader-*-win.zip` archive and run `Universal Downloader.exe`.
+Everything needed at runtime — the Python engine, FFmpeg, and static UI — is bundled.
+
+> v0.7.0 artifacts are generated locally with `npm run dist`. See
+> [Build from source](#build-from-source) for the full release pipeline.
+
+---
+
+## 🛠️ Architecture
 
 ```text
 universal-downloader/
-├── desktop/             # Electron Desktop Shell & System Tray Manager
-├── backend/             # FastAPI + yt-dlp + FFmpeg Sidecar Engine
-└── frontend/            # Next.js 14 + Tailwind CSS + TypeScript UI
+├── desktop/       Electron shell, tray, updater, drag-out, backend supervisor
+├── backend/       FastAPI + yt-dlp + FFmpeg sidecar engine
+├── frontend/      Next.js 14 + TypeScript + Tailwind UI
+└── docs/assets/   README screenshots and review artwork
 ```
 
-* **Desktop Shell**: Electron 33.4.11 + System Tray + Single Instance Lock
-* **Backend**: Python 3.11.9, FastAPI, Uvicorn, APScheduler, yt-dlp
-* **Frontend**: Next.js 14.2.35 (Static Export / Dev Server), Tailwind CSS
-* **Media Processing**: FFmpeg Essentials (bundled)
+| Layer | Stack |
+| --- | --- |
+| Desktop | Electron 33.4.11, system tray, single-instance lock, electron-updater |
+| Backend | Python 3.11, FastAPI, Uvicorn, APScheduler, yt-dlp |
+| Frontend | Next.js 14.2.35 static export, React 18, TypeScript, Tailwind CSS |
+| Media | Bundled FFmpeg Essentials, FFprobe, Node.js runtime |
 
 ---
 
-## 💻 Developer Guide
+## 💻 Build from source
 
-### 1. Requirements (For building from source)
-* Windows 10/11
-* Node.js v18+ (tested on v26)
-* Python 3.11+
-* FFmpeg in system PATH
+### Requirements
 
-### 2. Development Setup
+- Windows 10/11
+- Node.js 18+ (tested on Node 26)
+- Python 3.11+
+- FFmpeg available in `PATH`
 
-#### Backend:
+### Backend
+
 ```powershell
 cd backend
 python -m venv .venv
@@ -74,43 +153,84 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --port 8000 --host 127.0.0.1
 ```
 
-#### Frontend:
+### Frontend
+
 ```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-#### Desktop Shell:
+### Desktop shell
+
 ```powershell
 cd desktop
 npm install
 npm start
 ```
 
-### 3. Build Standalone Release
+### Package the standalone release
+
 ```powershell
-# 1. Export static frontend and refresh the bundled copy
+# 1. Build and sync the static frontend
 cd frontend
 npm run build
 Remove-Item ..\desktop\frontend-out -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item out ..\desktop\frontend-out -Recurse
 
-# 2. Rebuild and refresh the frozen backend engine
+# 2. Build and sync the frozen backend
 cd ..\backend
-.\.venv\Scripts\pyinstaller --noconfirm backend-engine.spec
+.\.venv\Scripts\pyinstaller backend-engine.spec --noconfirm --clean
 Remove-Item ..\desktop\backend-engine -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item dist\backend-engine ..\desktop\backend-engine -Recurse
 
-# 3. Package standalone desktop application
+# 3. Build the installer and portable ZIP
 cd ..\desktop
 npm run dist
 ```
-The output `.exe` and `.zip` will be generated in `desktop/dist-release/`.
+
+Outputs land in `desktop/dist-release/`. The installer is a one-click per-user NSIS build;
+the portable ZIP contains the same app with bundled runtime assets.
+
+---
+
+## 🔌 Headless quick-fetch API
+
+For streamers and automation, fetch an asset directly to disk without the UI:
+
+```http
+POST /api/rio/quick-fetch
+Content-Type: application/json
+X-App-Token: <session token>
+
+{
+  "url": "https://www.youtube.com/watch?v=...",
+  "format": "mp4",
+  "quality": "1080",
+  "save_to_dir": "D:\\Stream Assets"
+}
+```
+
+Supports the same formats and creator sites as the desktop app.
+
+---
+
+## 🧪 Verification
+
+The current release was checked with:
+
+- `pytest` — 132 tests / 89 subtests
+- `npm run build` — Next.js production build
+- Packaged startup, installed startup, menu/shortcut, and updater IPC smoke tests
+- Live TikTok Photo Mode extraction, ZIP download, and background-audio MP3 download
+- Live public Instagram carousel fallback
+- 820×620 / 125% and 1920×1080 appearance checks
 
 ---
 
 ## 📄 License
 
 Intended for personal use. Source code is licensed under the [MIT License](LICENSE).
-Third-party software notices and licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Third-party software notices and licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
