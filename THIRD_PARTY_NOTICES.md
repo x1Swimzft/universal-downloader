@@ -35,6 +35,7 @@ from their upstream projects.
 |---|---|---|
 | yt-dlp | Media extraction (inside the backend engine) | The Unlicense (https://github.com/yt-dlp/yt-dlp) |
 | Electron | Desktop shell | MIT (https://github.com/electron/electron). Chromium and other notices ship in `LICENSES.chromium.html`; do not remove it. |
+| electron-updater | Update scaffolding for future signed releases | MIT (https://github.com/electron-userland/electron-builder) |
 | Python 3.11 | Backend runtime (frozen) | PSF License |
 | PyInstaller | Freezing the backend | GPL-2.0 with a bootloader exception that allows distributing frozen apps under any license |
 | FastAPI, Pydantic | Backend API | MIT |

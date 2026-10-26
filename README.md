@@ -3,7 +3,7 @@
 Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), TikTok (No Watermark), Instagram Reels, Facebook, Twitter/X, and SoundCloud.
 
 ![Universal Downloader](https://img.shields.io/badge/Platform-Windows%2011-blue?logo=windows)
-![Version](https://img.shields.io/badge/Release-v0.3.0-green)
+![Version](https://img.shields.io/badge/Release-v0.5.0-green)
 ![Electron](https://img.shields.io/badge/Electron-33.4.11-47848F?logo=electron)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?logo=fastapi)
 ![Next.js](https://img.shields.io/badge/Next.js-14.2.35-black?logo=nextdotjs)
@@ -17,6 +17,10 @@ Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), T
 * **Real-time Download Queue**: Download multiple links simultaneously (concurrency limited to 3) with live progress bars, speed, and status over Server-Sent Events (SSE).
 * **Direct Stream Piping**: Streams single-stream MP4 files directly to the client without redundant disk caching.
 * **Full HD / 4K & Audio Extraction**: Automatically handles Node.js runtime challenges with `yt-dlp` and merges video/audio with bundled FFmpeg.
+* **Self-Healing Engine**: Browser-cookie import (`cookies.txt` or Chrome/Edge/Brave/Firefox) and in-app `yt-dlp` updates from PyPI without reinstalling the app.
+* **Photos & Carousels**: Downloads image-only Instagram posts and TikTok photo slideshows, saving multi-photo posts as a ZIP.
+* **Creator Workflow**: Optional start/end clipping, H.264 edit-ready and loudness-normalized presets, plus native drag-out into OBS, DaVinci Resolve, or CapCut.
+* **Smart Automation**: Clip-to-download global hotkey (`Ctrl+Shift+D`), social-media bypass encoding, and native completion notifications.
 * **Headless API for Streamers**: `POST /api/rio/quick-fetch` for automated background asset downloads directly to disk.
 
 ---
@@ -24,8 +28,8 @@ Native Windows 11 Desktop Application & Web Downloader for YouTube (up to 4K), T
 ## 🚀 Quick Download (Windows 11)
 
 Download the latest pre-packaged standalone release from the [`release/`](release/) directory:
-* **Installer**: `Universal Downloader Setup 0.3.0.exe` (One-click desktop setup)
-* **Portable**: `Universal Downloader-0.3.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
+* **Installer**: `Universal Downloader Setup 0.5.0.exe` (One-click desktop setup)
+* **Portable**: `Universal Downloader-0.5.0-win.zip` (Extract & run `Universal Downloader.exe` directly)
 
 > **No dependencies needed:** Everything (Python engine, FFmpeg, and UI) is completely bundled.
 
@@ -82,11 +86,19 @@ npm start
 
 ### 3. Build Standalone Release
 ```powershell
-# 1. Export static frontend
+# 1. Export static frontend and refresh the bundled copy
 cd frontend
 npm run build
+Remove-Item ..\desktop\frontend-out -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item out ..\desktop\frontend-out -Recurse
 
-# 2. Package standalone desktop application
+# 2. Rebuild and refresh the frozen backend engine
+cd ..\backend
+.\.venv\Scripts\pyinstaller --noconfirm backend-engine.spec
+Remove-Item ..\desktop\backend-engine -Recurse -Force -ErrorAction SilentlyContinue
+Copy-Item dist\backend-engine ..\desktop\backend-engine -Recurse
+
+# 3. Package standalone desktop application
 cd ..\desktop
 npm run dist
 ```
