@@ -16,7 +16,7 @@ export function Sidebar({
   onSelectView,
   activeQueueCount,
   onToggleTheme,
-  versionText = "v0.3.0 · Pro",
+  versionText = "v0.5.0 · Pro",
 }: SidebarProps) {
   return (
     <aside className="side">

@@ -9,6 +9,7 @@ import {
   getAppSettings,
   updateAppSettings,
   pickSaveFolder,
+  pickCookiesFile,
   openSaveFolder,
   triggerDesktopNotification,
   MediaInfo,
@@ -20,7 +21,7 @@ import {
 import { SvgSprite, Icon } from "@/components/Icons";
 import { Sidebar, SidebarView } from "@/components/Sidebar";
 import { UrlBar } from "@/components/UrlBar";
-import { PreviewCard } from "@/components/PreviewCard";
+import { PreviewCard, DownloadChoices } from "@/components/PreviewCard";
 import { DownloadCard } from "@/components/DownloadCard";
 import { HistoryView } from "@/components/HistoryView";
 import { SettingsView } from "@/components/SettingsView";
@@ -69,6 +70,7 @@ function mapSelectionToFormatQuality(
 }
 
 function formatHistoryLabel(item: QueueItem): string {
+  if (item.format === "images") return "Photos";
   if (item.format === "m4a") return "M4A";
   if (item.format === "opus") return "OPUS";
   if (item.format === "mp3") return `MP3 ${item.quality.replace(/k$/i, "") || "320"}k`;
@@ -95,6 +97,10 @@ export default function Home() {
     maxConcurrent: 3,
     saveFolder: "Downloads\\Universal Downloader",
     theme: "dark",
+    cookiesFromBrowser: "none",
+    cookiesFile: "",
+    socialBypass: false,
+    quickFetchHotkeyEnabled: true,
   });
 
   const completedIdsRef = useRef<Set<string>>(new Set());
@@ -155,6 +161,10 @@ export default function Home() {
                 platform: item.platform,
                 filename: item.filename,
                 completedAt: Date.now(),
+                start_time: item.start_time,
+                end_time: item.end_time,
+                preset: item.preset,
+                social_bypass: item.social_bypass,
               });
               if (settingsRef.current.notifyWhenFinished) {
                 triggerDesktopNotification(
@@ -203,8 +213,15 @@ export default function Home() {
         if (!plat && media.platform) {
           setDetectedPlatform(media.platform);
         }
-        const hasVideo = media.formats?.some((f) => f.resolution && f.resolution !== "audio");
-        if (!hasVideo || media.platform === "soundcloud") {
+        const isImagePost =
+          media.media_type === "image" || media.media_type === "carousel";
+        const hasVideo = media.formats?.some(
+          (f) => f.resolution && f.resolution !== "audio"
+        );
+        if (isImagePost) {
+          setMode("Video");
+          setSelectedOption("1080p");
+        } else if (!hasVideo || media.platform === "soundcloud") {
           setMode("Audio");
           setSelectedOption("MP3 320k");
         } else {
@@ -261,13 +278,20 @@ export default function Home() {
     setSelectedOption(nextMode === "Video" ? "1080p" : "MP3 320k");
   };
 
-  const handleStartDownload = async () => {
+  const handleStartDownload = async (choices?: DownloadChoices) => {
     if (!info || !url.trim()) return;
     setStartingDownload(true);
     setErrorMsg("");
     try {
-      const { format, quality } = mapSelectionToFormatQuality(mode, selectedOption);
-      await enqueueDownload(url.trim(), format, quality, info.title);
+      const isImagePost =
+        info.media_type === "image" || info.media_type === "carousel";
+      const { format, quality } = isImagePost
+        ? { format: "images" as DownloadFormat, quality: "" }
+        : mapSelectionToFormatQuality(mode, selectedOption);
+      await enqueueDownload(url.trim(), format, quality, info.title, {
+        ...choices,
+        socialBypass: settings.socialBypass,
+      });
       setActiveView("q");
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : "Failed to start download");
@@ -285,7 +309,12 @@ export default function Home() {
 
   const handleRedownload = async (item: HistoryItem) => {
     try {
-      await enqueueDownload(item.url, item.format, item.quality, item.title);
+      await enqueueDownload(item.url, item.format, item.quality, item.title, {
+        startTime: item.start_time,
+        endTime: item.end_time,
+        preset: item.preset,
+        socialBypass: item.social_bypass,
+      });
       setActiveView("q");
     } catch {}
   };
@@ -311,6 +340,11 @@ export default function Home() {
     setSettings(updated);
   };
 
+  const handlePickCookiesFile = async () => {
+    const updated = await pickCookiesFile();
+    setSettings(updated);
+  };
+
   const handleToggleTheme = () => {
     const currentTheme =
       document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -331,7 +365,7 @@ export default function Home() {
           onSelectView={setActiveView}
           activeQueueCount={activeQueueCount}
           onToggleTheme={handleToggleTheme}
-          versionText="v0.3.0 · Pro"
+          versionText="v0.5.0 · Pro"
         />
 
         <main>
@@ -450,6 +484,7 @@ export default function Home() {
                 settings={settings}
                 onUpdate={handleUpdateSettings}
                 onPickFolder={handlePickFolder}
+                onPickCookiesFile={handlePickCookiesFile}
               />
             </section>
 

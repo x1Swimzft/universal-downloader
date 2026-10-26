@@ -1,5 +1,5 @@
 import React from "react";
-import { QueueItem } from "../lib/api";
+import { QueueItem, startDragFile } from "../lib/api";
 
 export interface DownloadCardProps {
   item: QueueItem;
@@ -32,7 +32,16 @@ export function DownloadCard({ item, onCancel }: DownloadCardProps) {
         : `${qualityLabel ? `${qualityLabel} · ` : ""}${(item.speed || 0).toFixed(1)} MB/s`;
 
   return (
-    <div className={`qrow ${isDone ? "done" : ""} ${isActive ? "active" : ""}`}>
+    <div
+      className={`qrow ${isDone ? "done" : ""} ${isActive ? "active" : ""}`}
+      draggable={Boolean(isDone && item.filename)}
+      onDragStart={(event) => {
+        if (!isDone || !item.filename) return;
+        event.preventDefault();
+        startDragFile(item.filename).catch(() => {});
+      }}
+      title={isDone ? "Drag into OBS, DaVinci Resolve, or CapCut" : undefined}
+    >
       <div className="qline">
         <span className="chip">{item.platform || "Web"}</span>
         <span className="qtitle" title={label}>

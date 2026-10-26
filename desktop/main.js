@@ -9,6 +9,7 @@ const {
   dialog,
   shell,
   Notification,
+  globalShortcut,
 } = require("electron");
 const { spawn, execSync } = require("child_process");
 const crypto = require("crypto");
@@ -18,6 +19,17 @@ const http = require("http");
 const fs = require("fs");
 
 const appSessionToken = crypto.randomBytes(32).toString("hex");
+const QUICK_FETCH_ACCELERATOR = "CommandOrControl+Shift+D";
+const COOKIE_BROWSERS = ["none", "chrome", "edge", "brave", "firefox"];
+const MEDIA_URL_RE =
+  /^https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|facebook\.com|fb\.watch|twitter\.com|x\.com|soundcloud\.com)\/.+/i;
+
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require("electron-updater"));
+} catch (_) {
+  autoUpdater = null;
+}
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const BACKEND_DIR = path.join(ROOT_DIR, "backend");
@@ -77,6 +89,10 @@ function getDefaultSettings() {
     maxConcurrent: 3,
     saveFolder: path.join(app.getPath("downloads"), "Universal Downloader"),
     theme: "dark",
+    cookiesFromBrowser: "none",
+    cookiesFile: "",
+    socialBypass: false,
+    quickFetchHotkeyEnabled: true,
   };
 }
 
@@ -107,6 +123,22 @@ function loadSettings() {
             ? parsed.saveFolder
             : defaults.saveFolder,
         theme: parsed.theme === "light" ? "light" : "dark",
+        cookiesFromBrowser: COOKIE_BROWSERS.includes(parsed.cookiesFromBrowser)
+          ? parsed.cookiesFromBrowser
+          : defaults.cookiesFromBrowser,
+        cookiesFile:
+          typeof parsed.cookiesFile === "string" &&
+          (parsed.cookiesFile === "" || path.isAbsolute(parsed.cookiesFile))
+            ? parsed.cookiesFile
+            : defaults.cookiesFile,
+        socialBypass:
+          typeof parsed.socialBypass === "boolean"
+            ? parsed.socialBypass
+            : defaults.socialBypass,
+        quickFetchHotkeyEnabled:
+          typeof parsed.quickFetchHotkeyEnabled === "boolean"
+            ? parsed.quickFetchHotkeyEnabled
+            : defaults.quickFetchHotkeyEnabled,
       };
     } else {
       settings = defaults;
@@ -131,6 +163,8 @@ function syncSettingsToBackend() {
   const payload = JSON.stringify({
     max_concurrent: settings.maxConcurrent,
     save_folder: settings.saveFolder,
+    cookies_from_browser: settings.cookiesFromBrowser,
+    cookies_file: settings.cookiesFile,
   });
   const req = http.request(
     {
@@ -165,6 +199,102 @@ function isWithinAllowedFolder(targetPath, allowedRoot) {
   } catch (_) {
     return false;
   }
+}
+
+function showNotification(title, body) {
+  if (Notification.isSupported()) {
+    new Notification({ title: String(title), body: String(body || "") }).show();
+  }
+}
+
+function postBackendJson(pathname, payload) {
+  return new Promise((resolve, reject) => {
+    if (!activeBackendPort) {
+      return reject(new Error("Backend is not ready"));
+    }
+    const data = JSON.stringify(payload);
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: activeBackendPort,
+        path: pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(data),
+          "X-App-Token": appSessionToken,
+        },
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf-8");
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          let parsed = {};
+          try {
+            parsed = JSON.parse(body);
+          } catch (_) {}
+          resolve({ status: res.statusCode || 0, body: parsed });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.setTimeout(10 * 60 * 1000, () => {
+      req.destroy(new Error("Quick fetch timed out"));
+    });
+    req.write(data);
+    req.end();
+  });
+}
+
+function quickFetchFromClipboard() {
+  if (!settings || !settings.quickFetchHotkeyEnabled) return;
+  const url = (clipboard.readText() || "").trim();
+  if (!MEDIA_URL_RE.test(url)) {
+    showNotification("Quick fetch", "The clipboard does not contain a supported media link.");
+    return;
+  }
+  showNotification("Quick fetch started", url);
+  postBackendJson("/api/rio/quick-fetch", {
+    url,
+    format: "mp4",
+    quality: "1080",
+    save_to_dir: settings.saveFolder,
+  })
+    .then(({ status, body }) => {
+      if (status >= 200 && status < 300) {
+        showNotification("Quick fetch saved", body.local_path || body.title || url);
+      } else {
+        showNotification("Quick fetch failed", body.detail || `HTTP ${status}`);
+      }
+    })
+    .catch((error) => {
+      showNotification("Quick fetch failed", error.message || "Unknown error");
+    });
+}
+
+function registerQuickFetchHotkey() {
+  globalShortcut.unregister(QUICK_FETCH_ACCELERATOR);
+  if (!settings || !settings.quickFetchHotkeyEnabled) return;
+  const registered = globalShortcut.register(
+    QUICK_FETCH_ACCELERATOR,
+    quickFetchFromClipboard
+  );
+  if (!registered) {
+    showNotification(
+      "Hotkey unavailable",
+      `${QUICK_FETCH_ACCELERATOR} is already used by another app.`
+    );
+  }
+}
+
+function initAutoUpdater() {
+  if (!autoUpdater || !app.isPackaged) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.on("error", () => {});
+  autoUpdater.checkForUpdates().catch(() => {});
 }
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -413,9 +543,25 @@ function registerIpcHandlers() {
     if (patch.theme === "light" || patch.theme === "dark") {
       settings.theme = patch.theme;
     }
+    if (COOKIE_BROWSERS.includes(patch.cookiesFromBrowser)) {
+      settings.cookiesFromBrowser = patch.cookiesFromBrowser;
+    }
+    if (typeof patch.cookiesFile === "string") {
+      settings.cookiesFile =
+        patch.cookiesFile === "" || path.isAbsolute(patch.cookiesFile)
+          ? patch.cookiesFile
+          : settings.cookiesFile;
+    }
+    if (typeof patch.socialBypass === "boolean") {
+      settings.socialBypass = patch.socialBypass;
+    }
+    if (typeof patch.quickFetchHotkeyEnabled === "boolean") {
+      settings.quickFetchHotkeyEnabled = patch.quickFetchHotkeyEnabled;
+    }
     persistSettings();
     syncSettingsToBackend();
     updateTrayMenu();
+    registerQuickFetchHotkey();
     return settings;
   });
 
@@ -432,6 +578,41 @@ function registerIpcHandlers() {
       syncSettingsToBackend();
     }
     return settings;
+  });
+
+  ipcMain.handle("dialog:pick-cookies", async () => {
+    if (!mainWindow) return settings;
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: "Select cookies.txt",
+      properties: ["openFile"],
+      filters: [{ name: "Netscape cookies", extensions: ["txt"] }],
+    });
+    if (!res.canceled && res.filePaths && res.filePaths[0]) {
+      settings.cookiesFile = path.resolve(res.filePaths[0]);
+      persistSettings();
+      syncSettingsToBackend();
+    }
+    return settings;
+  });
+
+  ipcMain.handle("file:start-drag", (event, filePath) => {
+    if (!settings || typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+      return false;
+    }
+    const allowedRoot = settings.saveFolder;
+    if (!isWithinAllowedFolder(filePath, allowedRoot)) return false;
+    try {
+      const realTarget = fs.realpathSync(filePath);
+      if (!fs.statSync(realTarget).isFile()) return false;
+      const icon =
+        APP_ICON_PATH && fs.existsSync(APP_ICON_PATH)
+          ? nativeImage.createFromPath(APP_ICON_PATH)
+          : nativeImage.createEmpty();
+      event.sender.startDrag({ file: realTarget, icon });
+      return true;
+    } catch (_) {
+      return false;
+    }
   });
 
   ipcMain.handle("shell:open-folder", async (_event, targetPath) => {
@@ -513,6 +694,8 @@ app.whenReady().then(async () => {
   tray.on("click", () => mainWindow && mainWindow.show());
 
   startClipboardWatcher();
+  registerQuickFetchHotkey();
+  initAutoUpdater();
 });
 
 app.on("window-all-closed", () => {
@@ -525,5 +708,6 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  globalShortcut.unregisterAll();
   cleanupChildProcesses();
 });

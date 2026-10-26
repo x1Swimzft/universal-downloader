@@ -1,5 +1,5 @@
 import React from "react";
-import { HistoryItem } from "../lib/api";
+import { HistoryItem, startDragFile } from "../lib/api";
 import { Icon } from "./Icons";
 
 export interface HistoryViewProps {
@@ -24,7 +24,21 @@ export function HistoryView({
       ) : (
         <div className="group" id="hl">
           {items.map((item) => (
-            <div key={`${item.id}-${item.completedAt}`} className="hrow">
+            <div
+              key={`${item.id}-${item.completedAt}`}
+              className="hrow"
+              draggable={Boolean(item.filename)}
+              onDragStart={(event) => {
+                if (!item.filename) return;
+                event.preventDefault();
+                startDragFile(item.filename).catch(() => {});
+              }}
+              title={
+                item.filename
+                  ? "Drag into OBS, DaVinci Resolve, or CapCut"
+                  : undefined
+              }
+            >
               <div className="hmain">
                 <span className="htitle" title={item.title}>
                   {item.title}

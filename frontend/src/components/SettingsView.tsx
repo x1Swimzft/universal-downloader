@@ -1,5 +1,11 @@
-import React from "react";
-import { AppSettings } from "../lib/api";
+import React, { useEffect, useState } from "react";
+import {
+  AppSettings,
+  CookieBrowser,
+  ExtractorStatus,
+  getExtractorStatus,
+  updateExtractor,
+} from "../lib/api";
 import { SettingRow } from "./SettingRow";
 import { Switch } from "./Switch";
 
@@ -7,13 +13,62 @@ export interface SettingsViewProps {
   settings: AppSettings;
   onUpdate: (patch: Partial<AppSettings>) => void;
   onPickFolder: () => void;
+  onPickCookiesFile: () => void;
 }
 
 export function SettingsView({
   settings,
   onUpdate,
   onPickFolder,
+  onPickCookiesFile,
 }: SettingsViewProps) {
+  const [extractor, setExtractor] = useState<ExtractorStatus | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    getExtractorStatus()
+      .then((status) => {
+        if (active) setExtractor(status);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleUpdateExtractor = async () => {
+    setUpdating(true);
+    setUpdateMessage("");
+    try {
+      const status = await updateExtractor();
+      setExtractor(status);
+      setUpdateMessage(
+        status.message ||
+          (status.updated
+            ? "Updated. Restart the app to apply it."
+            : "yt-dlp is already up to date.")
+      );
+    } catch (error: unknown) {
+      setUpdateMessage(
+        error instanceof Error ? error.message : "Extractor update failed"
+      );
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const extractorSubtitle = extractor
+    ? `yt-dlp ${extractor.active_version}${
+        extractor.source === "user" ? " (installed)" : ""
+      }${
+        extractor.restart_required && extractor.user_version
+          ? ` · ${extractor.user_version} ready after restart`
+          : ""
+      }`
+    : "Checking installed version…";
+
   return (
     <>
       <div className="page-head">
@@ -54,6 +109,69 @@ export function SettingsView({
           />
         </SettingRow>
 
+        <SettingRow
+          title="Browser cookies"
+          subtitle="Use a signed-in browser for private or age-gated posts"
+        >
+          <select
+            aria-label="Browser cookies"
+            value={settings.cookiesFromBrowser}
+            onChange={(event) =>
+              onUpdate({
+                cookiesFromBrowser: event.target.value as CookieBrowser,
+              })
+            }
+          >
+            <option value="none">Off</option>
+            <option value="chrome">Chrome</option>
+            <option value="edge">Edge</option>
+            <option value="brave">Brave</option>
+            <option value="firefox">Firefox</option>
+          </select>
+        </SettingRow>
+
+        <SettingRow
+          title="Cookies file"
+          subtitle={settings.cookiesFile || "Optional Netscape cookies.txt"}
+        >
+          <span className="row-actions">
+            {settings.cookiesFile && (
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => onUpdate({ cookiesFile: "" })}
+              >
+                Clear
+              </button>
+            )}
+            <button type="button" className="btn sm" onClick={onPickCookiesFile}>
+              Choose
+            </button>
+          </span>
+        </SettingRow>
+
+        <SettingRow
+          title="Social media bypass"
+          subtitle="H.264 CFR 30 fps and clean metadata for TikTok / Reels"
+        >
+          <Switch
+            checked={settings.socialBypass}
+            onChange={(val) => onUpdate({ socialBypass: val })}
+            ariaLabel="Social media bypass"
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="Global quick-fetch hotkey"
+          subtitle="Ctrl+Shift+D downloads the copied link in the background"
+        >
+          <Switch
+            checked={settings.quickFetchHotkeyEnabled}
+            onChange={(val) => onUpdate({ quickFetchHotkeyEnabled: val })}
+            ariaLabel="Global quick-fetch hotkey"
+          />
+        </SettingRow>
+
         <SettingRow title="Simultaneous downloads">
           <select
             aria-label="Simultaneous downloads"
@@ -76,7 +194,23 @@ export function SettingsView({
             Change
           </button>
         </SettingRow>
+
+        <SettingRow title="Extractor engine" subtitle={extractorSubtitle}>
+          <button
+            type="button"
+            className="btn sm"
+            onClick={handleUpdateExtractor}
+            disabled={updating}
+          >
+            {updating ? "Updating…" : "Update"}
+          </button>
+        </SettingRow>
       </div>
+      {updateMessage && (
+        <div className="settings-note" role="status">
+          {updateMessage}
+        </div>
+      )}
     </>
   );
 }
