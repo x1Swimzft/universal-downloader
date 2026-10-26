@@ -17,7 +17,7 @@
     <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14.2.35-000000?logo=nextdotjs&logoColor=white" />
   </p>
   <p>
-    <a href="https://github.com/x1Swimzft/universal-downloader/releases">
+    <a href="https://github.com/x1Swimzft/universal-downloader/releases/latest">
       <img alt="Releases" src="https://img.shields.io/badge/Releases-Windows%20builds-ff3d5a?style=for-the-badge" />
     </a>
     <a href="#user-content--build-from-source">
@@ -100,18 +100,20 @@
 
 ## 📦 Install
 
-### Published builds
+### Installer (recommended)
 
-Download the latest installer or portable ZIP from the
-[**Releases page**](https://github.com/x1Swimzft/universal-downloader/releases).
+[**Download Universal-Downloader-Setup-0.7.0.exe**](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.7.0/Universal-Downloader-Setup-0.7.0.exe)
+— one-click per-user install, no dependencies.
 
 ### Portable
 
-Extract the `Universal Downloader-*-win.zip` archive and run `Universal Downloader.exe`.
+[**Download Universal Downloader-0.7.0-win.zip**](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.7.0/Universal.Downloader-0.7.0-win.zip)
+— extract and run `Universal Downloader.exe` directly.
+
 Everything needed at runtime — the Python engine, FFmpeg, and static UI — is bundled.
 
-> v0.7.0 artifacts are generated locally with `npm run dist`. See
-> [Build from source](#user-content--build-from-source) for the full release pipeline.
+See the [v0.7.0 release](https://github.com/x1Swimzft/universal-downloader/releases/tag/v0.7.0)
+for `latest.yml`, the `.blockmap`, and [SHA-256 checksums](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.7.0/SHA256SUMS-0.7.0.txt).
 
 ---
 
