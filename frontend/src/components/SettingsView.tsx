@@ -7,6 +7,7 @@ import {
   CookieBrowser,
   ExtractorStatus,
   getExtractorStatus,
+  installAppUpdate,
   UpdateCheckResult,
   updateExtractor,
 } from "../lib/api";
@@ -122,6 +123,7 @@ export function SettingsView({
   const [updateMessage, setUpdateMessage] = useState("");
   const [appUpdate, setAppUpdate] = useState<UpdateCheckResult | null>(null);
   const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
+  const [installingAppUpdate, setInstallingAppUpdate] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -167,6 +169,25 @@ export function SettingsView({
       });
     } finally {
       setCheckingAppUpdate(false);
+    }
+  };
+
+  const handleInstallAppUpdate = async () => {
+    setInstallingAppUpdate(true);
+    try {
+      const result = await installAppUpdate();
+      setAppUpdate({
+        status: result.status === "error" ? "error" : "available",
+        version: appUpdate?.version,
+        message: result.message,
+      });
+    } catch {
+      setAppUpdate({
+        status: "error",
+        message: "Could not download the update. Try again later.",
+      });
+    } finally {
+      setInstallingAppUpdate(false);
     }
   };
 
@@ -269,16 +290,27 @@ export function SettingsView({
       <div className="group" aria-label="App updates">
         <SettingRow
           title="App updates"
-          subtitle="Universal Downloader v0.7.0"
+          subtitle="Universal Downloader v0.7.1"
         >
-          <button
-            type="button"
-            className="btn sm"
-            onClick={handleCheckForAppUpdate}
-            disabled={checkingAppUpdate}
-          >
-            {checkingAppUpdate ? "Checking…" : "Check for updates"}
-          </button>
+          {appUpdate?.status === "available" ? (
+            <button
+              type="button"
+              className="btn sm"
+              onClick={handleInstallAppUpdate}
+              disabled={installingAppUpdate}
+            >
+              {installingAppUpdate ? "Downloading…" : "Install update"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn sm"
+              onClick={handleCheckForAppUpdate}
+              disabled={checkingAppUpdate}
+            >
+              {checkingAppUpdate ? "Checking…" : "Check for updates"}
+            </button>
+          )}
         </SettingRow>
         <div className="settings-note" aria-live="polite">
           {appUpdate?.message || ""}

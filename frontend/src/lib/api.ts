@@ -55,6 +55,11 @@ export interface UpdateCheckResult {
   message?: string;
 }
 
+export interface UpdateInstallResult {
+  status: "installing" | "unavailable" | "error";
+  message?: string;
+}
+
 export interface FormatOption {
   format_id: string;
   ext: string;
@@ -161,6 +166,7 @@ declare global {
       notify: (title: string, body?: string) => Promise<boolean>;
       startDrag: (filePath: string) => Promise<boolean>;
       checkForUpdate: () => Promise<UpdateCheckResult>;
+      installUpdate: () => Promise<UpdateInstallResult>;
       onSettingsUpdated: (cb: (updated: AppSettings) => void) => () => void;
       getAppToken: () => Promise<string>;
     };
@@ -555,6 +561,16 @@ export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
     status: "unavailable",
     version: "0.6.0",
     message: "Update checks are available in the installed desktop app.",
+  };
+}
+
+export async function installAppUpdate(): Promise<UpdateInstallResult> {
+  if (typeof window !== "undefined" && window.electronAPI?.installUpdate) {
+    return window.electronAPI.installUpdate();
+  }
+  return {
+    status: "unavailable",
+    message: "Updates are available in the installed desktop app.",
   };
 }
 

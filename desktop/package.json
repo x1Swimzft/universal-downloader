@@ -1,7 +1,7 @@
 {
   "name": "universal-downloader",
   "productName": "Universal Downloader",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Universal Video and Audio Downloader for Windows 11",
   "main": "main.js",
   "scripts": {

@@ -668,7 +668,7 @@ export default function Home() {
           onSelectView={setActiveView}
           activeQueueCount={activeQueueCount}
           onToggleTheme={handleToggleTheme}
-          versionText="v0.7.0 · Pro"
+          versionText="v0.7.1 · Pro"
         />
 
         <main>

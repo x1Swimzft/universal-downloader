@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   notify: (title, body) => ipcRenderer.invoke("notification:show", { title, body }),
   startDrag: (filePath) => ipcRenderer.invoke("file:start-drag", filePath),
   checkForUpdate: () => ipcRenderer.invoke("app:check-update"),
+  installUpdate: () => ipcRenderer.invoke("app:install-update"),
   onSettingsUpdated: (callback) => {
     const handler = (_event, updated) => callback(updated);
     ipcRenderer.on("settings:changed", handler);

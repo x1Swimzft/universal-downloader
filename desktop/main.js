@@ -611,6 +611,29 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle("app:install-update", async () => {
+    if (!app.isPackaged || !autoUpdater) {
+      return {
+        status: "unavailable",
+        message: "Updates are available in the installed desktop app.",
+      };
+    }
+    try {
+      await autoUpdater.downloadUpdate();
+      // Quit, run the downloaded installer, relaunch this app.
+      autoUpdater.quitAndInstall(false, true);
+      return {
+        status: "installing",
+        message: "Restarting to finish the update.",
+      };
+    } catch {
+      return {
+        status: "error",
+        message: "Could not download the update. Try again later.",
+      };
+    }
+  });
+
   ipcMain.handle("settings:get", () => {
     return settings || loadSettings();
   });
