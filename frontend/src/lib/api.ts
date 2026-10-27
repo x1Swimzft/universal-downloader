@@ -56,7 +56,7 @@ export interface UpdateCheckResult {
 }
 
 export interface UpdateInstallResult {
-  status: "installing" | "unavailable" | "error";
+  status: "installing" | "cancelled" | "unavailable" | "error";
   message?: string;
 }
 

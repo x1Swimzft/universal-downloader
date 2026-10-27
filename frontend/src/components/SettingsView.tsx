@@ -186,7 +186,7 @@ export function SettingsView({
     try {
       const result = await installAppUpdate();
       setAppUpdate({
-        status: result.status === "installing" ? "available" : result.status,
+        status: result.status === "installing" || result.status === "cancelled" ? "available" : result.status,
         version: appUpdate?.version,
         message: result.message,
       });

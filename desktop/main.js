@@ -18,6 +18,8 @@ const net = require("net");
 const http = require("http");
 const fs = require("fs");
 
+const { installUpdate } = require("./updater");
+
 const appSessionToken = crypto.randomBytes(32).toString("hex");
 const APP_USER_MODEL_ID = "com.universaldownloader.app";
 app.setName("Universal Downloader");
@@ -611,34 +613,15 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle("app:install-update", async () => {
-    if (!app.isPackaged || !autoUpdater) {
-      return {
-        status: "unavailable",
-        message: "Updates are available in the installed desktop app.",
-      };
-    }
-    try {
-      const downloaded = await autoUpdater.downloadUpdate();
-      if (!Array.isArray(downloaded) || downloaded.length === 0) {
-        return {
-          status: "error",
-          message: "No downloaded update to install. Check for updates again.",
-        };
-      }
-      // Quit, run the downloaded installer, relaunch this app.
-      autoUpdater.quitAndInstall(false, true);
-      return {
-        status: "installing",
-        message: "Restarting to finish the update.",
-      };
-    } catch {
-      return {
-        status: "error",
-        message: "Could not download the update. Try again later.",
-      };
-    }
-  });
+  ipcMain.handle("app:install-update", () =>
+    installUpdate({
+      app,
+      autoUpdater,
+      dialog,
+      // Give the IPC reply time to reach the renderer before the window closes.
+      scheduleQuit: (fn) => setTimeout(fn, 100),
+    })
+  );
 
   ipcMain.handle("settings:get", () => {
     return settings || loadSettings();
