@@ -11,6 +11,7 @@ import {
   retryQueueItem,
   clearFinishedQueue,
   deleteHistoryItem,
+  fetchHistory,
   clearHistory,
   getQueueStreamUrl,
   getAppSettings,
@@ -173,6 +174,8 @@ export default function Home() {
   });
 
   const completedIdsRef = useRef<Set<string>>(new Set());
+  const failedIdsRef = useRef<Set<string>>(new Set());
+  const cookieNoticeRef = useRef<{ code: string; at: number } | null>(null);
   const settingsRef = useRef<AppSettings>(settings);
   settingsRef.current = settings;
 
@@ -194,18 +197,30 @@ export default function Home() {
     return () => media.removeEventListener("change", syncSystemTheme);
   }, [appearance, appearanceReady]);
 
-  // Load history from localStorage, and settings from Electron IPC / backend
+  // History: backend is the source of truth; localStorage is a legacy fallback.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
-      if (raw) {
+    const loadLegacy = () => {
+      try {
+        const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+        if (!raw) return;
         const parsed: HistoryItem[] = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           setHistoryItems(parsed);
           parsed.forEach((h) => completedIdsRef.current.add(h.id));
         }
-      }
-    } catch {}
+      } catch {}
+    };
+
+    fetchHistory()
+      .then((items) => {
+        if (items.length > 0) {
+          setHistoryItems(items);
+          items.forEach((h) => completedIdsRef.current.add(h.id));
+        } else {
+          loadLegacy();
+        }
+      })
+      .catch(loadLegacy);
 
     getAppSettings().then((loaded) => {
       setSettings(loaded);
@@ -217,6 +232,23 @@ export default function Home() {
       });
     }
   }, []);
+
+  const notifyCookieOnce = (item: QueueItem) => {
+    // Dedupe per error code with a cooldown: one notification per batch/run,
+    // never one per failed item.
+    const code = item.error_code;
+    if (!code) return;
+    if (!["COOKIE_REQUIRED", "AUTH_403", "COOKIE_LOCKED"].includes(code)) return;
+    if (!settingsRef.current.notifyWhenFinished) return;
+    const now = Date.now();
+    const last = cookieNoticeRef.current;
+    if (last && last.code === code && now - last.at < 60_000) return;
+    cookieNoticeRef.current = { code, at: now };
+    triggerDesktopNotification(
+      "Sign-in required",
+      item.title || item.url
+    ).catch(() => {});
+  };
 
   // Connect to SSE stream for Queue updates
   useEffect(() => {
@@ -230,10 +262,13 @@ export default function Home() {
           setQueueItems(data);
 
           const newlyFinished: HistoryItem[] = [];
+          let refreshHistory = false;
           for (const item of data) {
             const isDone = item.status === "completed" || item.status === "done";
+            const isFailed = item.status === "error";
             if (isDone && !completedIdsRef.current.has(item.id)) {
               completedIdsRef.current.add(item.id);
+              refreshHistory = true;
               newlyFinished.push({
                 id: item.id,
                 url: item.url,
@@ -256,6 +291,19 @@ export default function Home() {
                 ).catch(() => {});
               }
             }
+            if (isFailed && !failedIdsRef.current.has(item.id)) {
+              failedIdsRef.current.add(item.id);
+              refreshHistory = true;
+              const code = item.error_code || "";
+              if (["COOKIE_REQUIRED", "AUTH_403", "COOKIE_LOCKED"].includes(code)) {
+                notifyCookieOnce(item);
+              } else if (settingsRef.current.notifyWhenFinished) {
+                triggerDesktopNotification(
+                  "Download failed",
+                  item.error || item.title || item.url
+                ).catch(() => {});
+              }
+            }
           }
 
           if (newlyFinished.length > 0) {
@@ -266,6 +314,14 @@ export default function Home() {
               } catch {}
               return updated;
             });
+          }
+
+          if (refreshHistory) {
+            fetchHistory()
+              .then((items) => {
+                if (items.length > 0) setHistoryItems(items);
+              })
+              .catch(() => {});
           }
         } catch {}
       };
@@ -658,6 +714,16 @@ export default function Home() {
   const finishedQueueCount = queueItems.filter(
     (i) => i.status === "completed" || i.status === "done"
   ).length;
+  const failedQueueCount = queueItems.filter((i) => i.status === "error").length;
+
+  const handleRetryFailed = async () => {
+    const failed = queueItems.filter((item) => item.status === "error");
+    for (const item of failed) {
+      try {
+        await handleRetryQueueItem(item.id);
+      } catch {}
+    }
+  };
 
   return (
     <>
@@ -758,6 +824,15 @@ export default function Home() {
                   <span className="queue-count">
                     {activeQueueCount} / {settings.maxConcurrent} active
                   </span>
+                  {failedQueueCount > 0 && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={handleRetryFailed}
+                    >
+                      Retry failed ({failedQueueCount})
+                    </button>
+                  )}
                   {finishedQueueCount > 0 && (
                     <button
                       type="button"

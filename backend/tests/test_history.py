@@ -199,3 +199,53 @@ class TestQueueHistoryRecording(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(record["completedAt"], int)
         self.assertTrue(record["social_bypass"])
         self.assertEqual(record["preset"], "best")
+
+    async def test_failed_download_is_recorded_without_a_filename(self):
+        item = QueueItem(
+            id="job-fail",
+            url="https://www.instagram.com/p/gated/",
+            format="mp4",
+            quality="1080",
+            title="Gated post",
+            platform="Instagram",
+        )
+        self.queue.items[item.id] = item
+        self.queue._cancel_events[item.id] = asyncio.Event()
+
+        async def fake_download(*args, **kwargs):
+            raise ValueError("ERROR: 403 Forbidden")
+
+        with unittest.mock.patch(
+            "app.services.queue_manager.download_media", side_effect=fake_download
+        ):
+            await self.queue._worker(item.id)
+
+        self.assertEqual(item.status, "error")
+        records = history_store.list()
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["error_code"], "AUTH_403")
+        self.assertIsNone(record["filename"])
+
+    async def test_deleting_a_history_record_never_deletes_the_file(self):
+        library_file = os.path.join(self.temp_dir, "keep-me.mp4")
+        with open(library_file, "wb") as fh:
+            fh.write(b"still here")
+        history_store.add(
+            {
+                "id": "job-keep",
+                "url": "https://example.com/v",
+                "title": "Keep",
+                "format": "mp4",
+                "quality": "1080",
+                "filename": library_file,
+                "completedAt": 1,
+                "status": "completed",
+            }
+        )
+
+        self.assertTrue(history_store.delete("job-keep"))
+
+        self.assertEqual(history_store.list(), [])
+        self.assertTrue(os.path.isfile(library_file))

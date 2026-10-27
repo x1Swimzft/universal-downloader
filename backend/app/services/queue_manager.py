@@ -184,6 +184,27 @@ class QueueManager:
                 except OSError:
                     pass
 
+    def _record_history(self, item: "QueueItem", status: str) -> None:
+        """Append a history entry. Additive fields keep old records valid."""
+        entry = {
+            "id": item.id,
+            "url": item.url,
+            "title": item.title,
+            "format": item.format,
+            "quality": item.quality,
+            "platform": item.platform,
+            "filename": item.filename if status == "completed" else None,
+            "completedAt": int(time.time() * 1000),
+            "start_time": item.start_time,
+            "end_time": item.end_time,
+            "preset": item.preset,
+            "social_bypass": item.social_bypass,
+            "status": status,
+        }
+        if status == "failed":
+            entry["error_code"] = item.error_code
+        history_store.add(entry)
+
     def add(
         self,
         url: str,
@@ -438,22 +459,7 @@ class QueueManager:
                             item.error_code = None
 
                             try:
-                                history_store.add(
-                                    {
-                                        "id": item.id,
-                                        "url": item.url,
-                                        "title": item.title,
-                                        "format": item.format,
-                                        "quality": item.quality,
-                                        "platform": item.platform,
-                                        "filename": item.filename,
-                                        "completedAt": int(time.time() * 1000),
-                                        "start_time": item.start_time,
-                                        "end_time": item.end_time,
-                                        "preset": item.preset,
-                                        "social_bypass": item.social_bypass,
-                                    }
-                                )
+                                self._record_history(item, "completed")
                             except Exception:
                                 # History is best-effort and must not turn a finished download into an error.
                                 pass
@@ -507,6 +513,10 @@ class QueueManager:
                             item.error = user_message
                             item.error_code = error_code
                             self._cleanup_tmp_files(job_id)
+                            try:
+                                self._record_history(item, "failed")
+                            except Exception:
+                                pass
                             if self.external_task_store is not None:
                                 self.external_task_store[job_id] = {
                                     "status": "error",

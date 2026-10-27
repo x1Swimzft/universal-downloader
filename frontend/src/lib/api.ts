@@ -153,6 +153,8 @@ export interface HistoryItem {
   end_time?: string;
   preset?: string;
   social_bypass?: boolean;
+  status?: "completed" | "failed";
+  error_code?: string;
 }
 
 declare global {
