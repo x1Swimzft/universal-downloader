@@ -9,7 +9,7 @@
   </p>
   <p>
     <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078D4?logo=windows&logoColor=white" />
-    <img alt="Release v0.7.1" src="https://img.shields.io/badge/release-v0.7.1-ff3d5a" />
+    <img alt="Release v0.8.0" src="https://img.shields.io/badge/release-v0.8.0-ff3d5a" />
     <img alt="Review 4.7 out of 5" src="https://img.shields.io/badge/review-4.7%2F5-ff5a70" />
     <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-22c55e" />
     <img alt="Electron" src="https://img.shields.io/badge/Electron-33.4.11-47848F?logo=electron&logoColor=white" />
@@ -102,18 +102,18 @@
 
 ### Installer (recommended)
 
-[**Download Universal-Downloader-Setup-0.7.1.exe**](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.7.1/Universal-Downloader-Setup-0.7.1.exe)
+[**Download Universal-Downloader-Setup-0.8.0.exe**](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.8.0/Universal-Downloader-Setup-0.8.0.exe)
 — one-click per-user install, no dependencies.
 
 ### Portable
 
-[**Download Universal.Downloader-0.7.1-win.zip**](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.7.1/Universal.Downloader-0.7.1-win.zip)
+[**Download Universal.Downloader-0.8.0-win.zip**](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.8.0/Universal.Downloader-0.8.0-win.zip)
 — extract and run `Universal Downloader.exe` directly.
 
 Everything needed at runtime — the Python engine, FFmpeg, and static UI — is bundled.
 
-See the [v0.7.1 release](https://github.com/x1Swimzft/universal-downloader/releases/tag/v0.7.1)
-for `latest.yml`, the `.blockmap`, and [SHA-256 checksums](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.7.1/SHA256SUMS-0.7.1.txt).
+See the [v0.8.0 release](https://github.com/x1Swimzft/universal-downloader/releases/tag/v0.8.0)
+for `latest.yml`, the `.blockmap`, and [SHA-256 checksums](https://github.com/x1Swimzft/universal-downloader/releases/download/v0.8.0/SHA256SUMS-0.8.0.txt).
 
 ---
 
