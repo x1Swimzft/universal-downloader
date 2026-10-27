@@ -280,6 +280,41 @@ if (notesPath && !existsSync(notesPath)) {
   }
 }
 
+// --- 7. backend engine freshness -----------------------------------------
+// desktop/backend-engine is a prebuilt PyInstaller folder; nothing else checks it,
+// and a stale copy ships an old API without failing any other test.
+const engineExe = join(repo, 'desktop', 'backend-engine', 'backend-engine.exe');
+const backendApp = join(repo, 'backend', 'app');
+if (!existsSync(engineExe)) {
+  fail(`backend-engine.exe not found at ${engineExe}`);
+} else if (!existsSync(backendApp)) {
+  fail(`backend/app not found at ${backendApp}`);
+} else {
+  const newestSource = (dir) => {
+    let newest = 0;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '__pycache__') continue;
+        newest = Math.max(newest, newestSource(full));
+      } else if (entry.name.endsWith('.py')) {
+        newest = Math.max(newest, statSync(full).mtimeMs);
+      }
+    }
+    return newest;
+  };
+  const sourceTime = newestSource(backendApp);
+  const engineTime = statSync(engineExe).mtimeMs;
+  if (sourceTime > engineTime) {
+    fail(
+      `backend-engine.exe is older than backend/app sources - rebuild it ` +
+        `(pyinstaller backend-engine.spec) and copy backend/dist/backend-engine into desktop/`
+    );
+  } else {
+    pass('backend-engine.exe is newer than backend/app sources');
+  }
+}
+
 // --- result --------------------------------------------------------------
 console.log('');
 if (failures.length) {
