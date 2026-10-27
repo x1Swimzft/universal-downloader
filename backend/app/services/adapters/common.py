@@ -4,9 +4,10 @@ from __future__ import annotations
 import html as html_lib
 import ipaddress
 import json
+import os
 import re
 import socket
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -247,3 +248,81 @@ def _json_string_after(text: str, marker: str) -> Optional[str]:
         raw.append(char)
         pos += 1
     return None
+
+
+async def _fetch_public_html(url: str, referer: Optional[str] = None) -> Optional[str]:
+    headers = {"User-Agent": TIKTOK_UA}
+    if referer:
+        headers["Referer"] = referer
+    try:
+        async with httpx.AsyncClient(
+            headers=headers, timeout=MUSIC_TIMEOUT, follow_redirects=False
+        ) as client:
+            current = url
+            for _ in range(4):
+                if not validate_url_not_private(current):
+                    return None
+                response = await client.get(current)
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        return None
+                    current = urljoin(current, location)
+                    continue
+                if response.status_code >= 400:
+                    return None
+                return response.text
+    except Exception:
+        return None
+    return None
+
+
+BROWSER_CHOICES = ("none", "chrome", "edge", "brave", "firefox")
+
+
+MAX_COOKIE_FILE_BYTES = 5 * 1024 * 1024
+
+
+_cookie_preferences: Dict[str, Optional[str]] = {
+    "cookies_from_browser": "none",
+    "cookies_file": None,
+}
+
+
+def _validated_cookie_file(path: Optional[str]) -> Optional[str]:
+    """Return a real cookies.txt path or raise. Empty string clears the setting."""
+    if path is None:
+        return None
+    cleaned = str(path).strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith(("\\\\", "//")):
+        raise ValueError("Cookies file must be on a local drive")
+    if not os.path.isabs(cleaned):
+        raise ValueError("Cookies file must be an absolute path")
+    if os.path.splitext(cleaned)[1].lower() != ".txt":
+        raise ValueError("Cookies file must be a .txt file")
+    real = os.path.realpath(cleaned)
+    if not os.path.isfile(real):
+        raise ValueError("Cookies file does not exist")
+    if os.path.getsize(real) <= 0 or os.path.getsize(real) > MAX_COOKIE_FILE_BYTES:
+        raise ValueError("Cookies file is empty or larger than 5 MB")
+    return real
+
+
+def set_cookie_preferences(
+    cookies_from_browser: Optional[str] = None,
+    cookies_file: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    if cookies_from_browser is not None:
+        browser = str(cookies_from_browser).strip().lower()
+        if browser not in BROWSER_CHOICES:
+            raise ValueError("Invalid browser cookie source")
+        _cookie_preferences["cookies_from_browser"] = browser
+    if cookies_file is not None:
+        _cookie_preferences["cookies_file"] = _validated_cookie_file(cookies_file)
+    return get_cookie_preferences()
+
+
+def get_cookie_preferences() -> Dict[str, Optional[str]]:
+    return dict(_cookie_preferences)
