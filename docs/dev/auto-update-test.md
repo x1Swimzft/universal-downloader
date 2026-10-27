@@ -193,6 +193,17 @@ Clean up: quit the copy from the tray, stop the server, delete `$t`.
 
 ## 4. Full 0.7.0 → 0.7.1 install test — blocked
 
+> **Update 2026-10-27 (v0.7.1):** blocker 1 is fixed — `desktop/main.js` now handles
+> `app:install-update` (`downloadUpdate()` + `quitAndInstall()`) and Settings shows
+> **Install update** when a version is available. Verified end-to-end on the packaged 0.7.1
+> build against a local feed advertising 0.7.2: `latest.yml` → `.blockmap` → installer were
+> fetched, the app quit, the installer ran, the app relaunched and the updater cache was
+> cleaned.
+>
+> The 0.7.0 → 0.7.1 leg still cannot be automatic: 0.7.0 shipped without that IPC bridge, so
+> its Settings can only report the new version. 0.7.0 users must install 0.7.1 by hand once;
+> every later version can update itself.
+
 These are real blockers, not polish:
 
 1. **No download/install path in the app.** `autoDownload = false` and nothing ever calls
