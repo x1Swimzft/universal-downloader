@@ -592,7 +592,7 @@ export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
   }
   return {
     status: "unavailable",
-    version: "0.6.0",
+    version: "0.9.0",
     message: "Update checks are available in the installed desktop app.",
   };
 }
