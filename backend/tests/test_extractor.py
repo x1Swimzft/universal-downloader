@@ -1703,5 +1703,116 @@ class TestErrorSanitization(unittest.TestCase):
         self.assertIsNone(error_action("UNKNOWN"))
 
 
+# Fixtures in tests/fixtures were captured 2026-10-27 from live public pages and then
+# trimmed/sanitised (signed query values replaced with REDACTED). Known gaps: TikTok
+# embed/v2/<id> answered 503 "overload-protect triggered" (that shape stays covered by
+# TestTikTokPhoto above), and the desktop photo page now ships a shell without
+# imagePost/api-data (covered by the desktop fixture plus the fetch fallback test below).
+FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+
+
+def _fixture(*parts):
+    with open(os.path.join(FIXTURES_DIR, *parts), encoding="utf-8") as handle:
+        return handle.read()
+
+
+class TestCapturedTikTokFixtures(unittest.IsolatedAsyncioTestCase):
+    PHOTO_TITLE = "Images The Photographer Couldn\u2019t Believe They Captured"
+
+    def test_mobile_html_fixture(self):
+        html = _fixture("tiktok", "photo_mobile.html")
+        images, title = _parse_tiktok_photo_html(html)
+
+        self.assertEqual(title, self.PHOTO_TITLE)
+        self.assertEqual(len(images), 3)
+        self.assertEqual(len(set(images)), 3)
+        self.assertTrue(
+            images[0].startswith(
+                "https://p16-common-sign.tiktokcdn.com/tos-no1a-i-photomode-no/"
+                "2ad7b76051ee4df1a900e884b6e3891e~tplv-photomode-image.jpeg?"
+            )
+        )
+        # urlList keeps its order: the p19 mirror URL is never picked.
+        self.assertNotIn("p19-common-sign", images[0])
+        self.assertIn("x-signature=REDACTED", images[0])
+        self.assertNotIn("J%2B", html)
+
+    def test_desktop_html_fixture_is_a_shell(self):
+        html = _fixture("tiktok", "photo_desktop.html")
+
+        self.assertIn("__UNIVERSAL_DATA_FOR_REHYDRATION__", html)
+        self.assertNotIn('"imagePost"', html)
+        self.assertEqual(_parse_tiktok_photo_html(html), ([], None))
+
+    async def test_fetch_falls_back_from_desktop_to_mobile_fixture(self):
+        fetch = AsyncMock(
+            side_effect=[
+                _fixture("tiktok", "photo_desktop.html"),
+                _fixture("tiktok", "photo_mobile.html"),
+            ]
+        )
+        with patch.object(extractor, "_tiktok_fetch_html", fetch):
+            images, title = await extractor._fetch_tiktok_photos(
+                "https://www.tiktok.com/@lucasvisual/photo/7508048429776407830"
+            )
+
+        self.assertEqual(title, self.PHOTO_TITLE)
+        self.assertEqual(len(images), 3)
+        self.assertEqual(fetch.await_count, 2)
+        desktop_url, desktop_ua = fetch.await_args_list[0].args
+        mobile_url, mobile_ua = fetch.await_args_list[1].args
+        self.assertNotIn("is_from_webapp", desktop_url)
+        self.assertEqual(desktop_ua, extractor.TIKTOK_UA)
+        self.assertIn("is_from_webapp=1", mobile_url)
+        self.assertEqual(mobile_ua, extractor._TIKTOK_MOBILE_UA)
+
+
+class TestCapturedInstagramFixtures(unittest.TestCase):
+    def test_embed_captioned_fixture_parses_public_carousel(self):
+        html = _fixture("instagram", "embed_captioned.html")
+
+        info = extractor._instagram_media_info(html)
+
+        # Captured with the facebookexternalhit crawler UA the app sends.
+        # Re-capturing with a browser UA yields the login shell instead.
+        self.assertIsNotNone(info)
+        self.assertEqual(info.media_type, "carousel")
+        self.assertEqual(len(info.images), 7)
+        self.assertTrue(all(url.startswith("https://") for url in info.images))
+        self.assertTrue(info.title)
+        self.assertIn("=REDACTED", info.images[0])
+
+    def test_gated_login_wall_fixture_has_no_media(self):
+        html = _fixture("instagram", "gated_login_wall.html")
+
+        self.assertIn("<title>Login", html)
+        self.assertIsNone(extractor._meta_content(html, "og:image"))
+        self.assertIsNone(extractor._instagram_media_info(html))
+
+
+class TestCapturedSpotifyFixture(unittest.IsolatedAsyncioTestCase):
+    async def test_track_embed_fixture_resolves_metadata(self):
+        get_text = AsyncMock(return_value=_fixture("spotify", "track_embed.html"))
+        with patch.object(extractor, "_get_text", get_text):
+            data = await extractor._resolve_spotify(
+                "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+            )
+
+        self.assertEqual(data["platform"], "spotify")
+        self.assertEqual(data["media_type"], "track")
+        self.assertEqual(data["title"], "Never Gonna Give You Up")
+        self.assertEqual(data["artist"], "Rick Astley")
+        self.assertIsNone(data["album"])
+        entry = data["entries"][0]
+        self.assertEqual(
+            entry["url"], "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+        )
+        self.assertEqual(entry["duration"], 214)
+        self.assertEqual(
+            entry["search_query"], "Rick Astley - Never Gonna Give You Up official audio"
+        )
+        get_text.assert_awaited_once()
+
+
 if __name__ == "__main__":
     unittest.main()
