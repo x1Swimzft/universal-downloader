@@ -117,6 +117,44 @@ for `latest.yml`, the `.blockmap`, and [SHA-256 checksums](https://github.com/x1
 
 ---
 
+## Windows SmartScreen & checksum verification
+
+The builds are **not code-signed yet**, so Windows SmartScreen may show
+*"Windows protected your PC"* on first run.
+
+1. Click **More info**, then **Run anyway**. The installer is a per-user install and does
+   not require administrator rights.
+2. For the portable ZIP: right-click the downloaded file → **Properties** → tick
+   **Unblock** → **OK**, then extract.
+
+### Verify what you downloaded
+
+Every release publishes `SHA256SUMS-<version>.txt` (UTF-8) next to the installer:
+
+```powershell
+Get-FileHash .\Universal-Downloader-Setup-1.0.0.exe -Algorithm SHA256
+```
+
+Compare the output with the matching line in `SHA256SUMS-1.0.0.txt` or the release notes.
+On Linux/macOS: `sha256sum -c SHA256SUMS-1.0.0.txt`.
+
+### If something fails
+
+See [docs/troubleshooting.md](docs/troubleshooting.md) for every error code the app can
+show, and [docs/cookies.md](docs/cookies.md) for sign-in-required links.
+
+---
+
+## ⚖️ Usage disclaimer
+
+Universal Downloader is a personal tool. You are responsible for what you download and
+for complying with the terms of service of each platform and with copyright law in your
+jurisdiction. Do not use it to redistribute content you do not have the rights to. The
+app does not bypass DRM; Spotify and Apple Music links are resolved to matching audio
+that you could otherwise obtain.
+
+---
+
 ## 🛠️ Architecture
 
 ```text

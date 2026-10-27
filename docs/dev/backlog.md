@@ -57,3 +57,12 @@ bundled copy by design.
   `pyinstaller backend-engine.spec` and copy `backend/dist/backend-engine` into
   `desktop/backend-engine` before every package. Upgrade: give the backend an
   `APP_VERSION` and make `verify-release` compare it, or hash the engine in the guard.
+
+## Update channels - deferred to v1.1
+
+Phase 4.C kept the stable feed untouched: no uild.publish.channel change and no
+artifact naming change for 1.0.0, so `latest.yml` stays byte-compatible for
+0.9.0 -> 1.0.0. A beta channel (`beta.yml` only when the version contains `-beta`)
+needs its own electron-builder config change and an end-to-end feed test; doing it in the
+same release as the 1.0.0 updater bump would put the stable path at risk for no user
+benefit. Revisit in v1.1 with the local harness in `docs/dev/auto-update-test.md`.
