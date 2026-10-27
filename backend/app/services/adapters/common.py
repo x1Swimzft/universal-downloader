@@ -219,3 +219,31 @@ def _json_object_after(text: str, marker: str) -> Optional[Dict[str, Any]]:
                     return None
                 return value if isinstance(value, dict) else None
     return None
+
+
+def _json_string_after(text: str, marker: str) -> Optional[str]:
+    """Decode the JSON string value that follows a marker (honours escapes)."""
+    pos = text.find(marker)
+    if pos < 0:
+        return None
+    pos += len(marker)
+    while pos < len(text) and text[pos] in " \t\r\n:":
+        pos += 1
+    if pos >= len(text) or text[pos] != '"':
+        return None
+    pos += 1
+    raw: List[str] = []
+    while pos < len(text):
+        char = text[pos]
+        if char == "\\":
+            raw.append(text[pos : pos + 2])
+            pos += 2
+            continue
+        if char == '"':
+            try:
+                return json.loads('"' + "".join(raw) + '"')
+            except (TypeError, ValueError):
+                return None
+        raw.append(char)
+        pos += 1
+    return None
