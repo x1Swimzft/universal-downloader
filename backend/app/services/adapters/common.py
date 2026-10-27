@@ -167,3 +167,55 @@ def _image_extension(url: str, content_type: str) -> str:
         return mapping[clean_type]
     suffix = os.path.splitext(urlparse(url).path)[1].lower()
     return ".jpg" if suffix == ".jpeg" else suffix if suffix in (".jpg", ".png", ".webp") else ".jpg"
+
+
+def _find_key(node: Any, key: str) -> Any:
+    if isinstance(node, dict):
+        if key in node:
+            return node[key]
+        for value in node.values():
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _json_object_after(text: str, marker: str) -> Optional[Dict[str, Any]]:
+    """Brace-match and decode the first JSON object after a marker."""
+    pos = text.find(marker)
+    if pos < 0:
+        return None
+    start = text.find("{", pos + len(marker))
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    value = json.loads(text[start : index + 1])
+                except (TypeError, ValueError):
+                    return None
+                return value if isinstance(value, dict) else None
+    return None

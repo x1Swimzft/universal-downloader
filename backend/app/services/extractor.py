@@ -39,7 +39,16 @@ from yt_dlp.utils import download_range_func
 
 from app.models.schemas import MediaInfo, FormatOption, PreviewEntry
 
+from app.services.adapters.tiktok import (
+    _TIKTOK_MOBILE_UA,    _fetch_tiktok_photos,
+    _tiktok_fetch_html,
+    _parse_tiktok_photo_html,
+    _tiktok_photo_info,
+)
+
 from app.services.adapters.common import (
+    _find_key,
+    _json_object_after,
     TIKTOK_UA,
     _get_text,
     _image_extension,
@@ -123,10 +132,6 @@ def set_cookie_preferences(
 
 def get_cookie_preferences() -> Dict[str, Optional[str]]:
     return dict(_cookie_preferences)
-
-
-
-
 
 
 def _clean_url(url: str) -> str:
@@ -399,154 +404,6 @@ def _collect_entries(info: Dict[str, Any], limit: int = 100) -> List[dict]:
     return entries
 
 
-def _find_key(node: Any, key: str) -> Any:
-    if isinstance(node, dict):
-        if key in node:
-            return node[key]
-        for value in node.values():
-            found = _find_key(value, key)
-            if found is not None:
-                return found
-    elif isinstance(node, list):
-        for value in node:
-            found = _find_key(value, key)
-            if found is not None:
-                return found
-    return None
-
-
-_TIKTOK_MOBILE_UA = (
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
-    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-)
-_TIKTOK_AWEME_RE = re.compile(r"/(?:photo|video)/(\d+)")
-
-
-def _tiktok_first_url(holder: Any) -> Optional[str]:
-    """First full-size CDN URL in a urlList holder."""
-    if isinstance(holder, dict) and isinstance(holder.get("urlList"), list):
-        for url in holder["urlList"]:
-            if isinstance(url, str) and url.startswith("http"):
-                return url
-    return None
-
-
-def _tiktok_image_urls(node: Any) -> List[str]:
-    """One full-size URL per image from an imagePost/imagePostInfo object."""
-    if not isinstance(node, dict):
-        return []
-    items = node.get("displayImages")
-    if not isinstance(items, list):
-        items = node.get("images")
-    if not isinstance(items, list):
-        return []
-    urls: List[str] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        url = (
-            _tiktok_first_url(item.get("imageURL"))
-            or _tiktok_first_url(item.get("displayImage"))
-            or _tiktok_first_url(item)
-        )
-        if url:
-            urls.append(url)
-    return urls
-
-
-def _tiktok_title(value: Any) -> Optional[str]:
-    if not isinstance(value, str):
-        return None
-    lines = html_lib.unescape(value).strip().splitlines()
-    title = lines[0].strip() if lines else ""
-    return title[:120].rstrip() or None
-
-
-def _parse_tiktok_photo_html(html: str) -> tuple[List[str], Optional[str]]:
-    """Extract full-size slideshow URLs and a title from any TikTok page variant."""
-    images: List[str] = []
-    title: Optional[str] = None
-
-    match = re.search(
-        r'<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
-        html,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if match:
-        try:
-            data = json.loads(match.group(1))
-        except (TypeError, ValueError):
-            data = None
-        if isinstance(data, dict):
-            for key in ("imagePost", "imagePostInfo"):
-                node = _find_key(data, key)
-                if isinstance(node, dict):
-                    images.extend(_tiktok_image_urls(node))
-                    title = title or _tiktok_title(
-                        node.get("title") or node.get("desc")
-                    )
-            title = title or _tiktok_title(_find_key(data, "desc"))
-
-    # Page variants keep these objects outside the hydration script (mobile/embed).
-    for marker in ('"imagePost"', '"imagePostInfo"'):
-        node = _json_object_after(html, marker)
-        if isinstance(node, dict):
-            images.extend(_tiktok_image_urls(node))
-            title = title or _tiktok_title(node.get("title") or node.get("desc"))
-
-    title = title or _tiktok_title(_meta_content(html, "og:title"))
-    return list(dict.fromkeys(images)), title
-
-
-async def _tiktok_fetch_html(url: str, user_agent: str) -> Optional[str]:
-    headers = {"User-Agent": user_agent, "Referer": "https://www.tiktok.com/"}
-    try:
-        async with httpx.AsyncClient(
-            headers=headers, timeout=20.0, follow_redirects=False
-        ) as client:
-            current = url
-            for _ in range(4):
-                if not validate_url_not_private(current):
-                    return None
-                resp = await client.get(current)
-                if resp.is_redirect:
-                    location = resp.headers.get("location")
-                    if not location:
-                        return None
-                    current = urljoin(current, location)
-                    host = (urlparse(current).hostname or "").lower()
-                    if host != "tiktok.com" and not host.endswith(".tiktok.com"):
-                        return None
-                    continue
-                if resp.status_code >= 400:
-                    return None
-                return resp.text
-    except Exception:
-        return None
-    return None
-
-
-async def _fetch_tiktok_photos(url: str) -> tuple[List[str], Optional[str]]:
-    """Try desktop, mobile, then embed pages for photo slideshow images."""
-    clean = str(url or "").strip()
-    candidates = [(clean, TIKTOK_UA)]
-    separator = "&" if "?" in clean else "?"
-    candidates.append(
-        (clean + separator + "is_from_webapp=1&sender_device=pc", _TIKTOK_MOBILE_UA)
-    )
-    aweme_match = _TIKTOK_AWEME_RE.search(clean)
-    if aweme_match:
-        candidates.append(
-            (f"https://www.tiktok.com/embed/v2/{aweme_match.group(1)}", TIKTOK_UA)
-        )
-    for candidate, agent in candidates:
-        page = await _tiktok_fetch_html(candidate, agent)
-        if not page:
-            continue
-        images, title = _parse_tiktok_photo_html(page)
-        if images:
-            return images, title
-    return [], None
 
 
 _PINTEREST_ORIGINAL_RE = re.compile(r"^(https?://i\.pinimg\.com/)[^/]+/", re.IGNORECASE)
@@ -686,40 +543,6 @@ def _json_string_after(text: str, marker: str) -> Optional[str]:
     return None
 
 
-def _json_object_after(text: str, marker: str) -> Optional[Dict[str, Any]]:
-    """Brace-match and decode the first JSON object after a marker."""
-    pos = text.find(marker)
-    if pos < 0:
-        return None
-    start = text.find("{", pos + len(marker))
-    if start < 0:
-        return None
-    depth = 0
-    in_string = False
-    escaped = False
-    for index in range(start, len(text)):
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    value = json.loads(text[start : index + 1])
-                except (TypeError, ValueError):
-                    return None
-                return value if isinstance(value, dict) else None
-    return None
 
 
 def _instagram_context_payload(html_text: str) -> Any:
@@ -1036,19 +859,6 @@ def _audio_formats(info: Dict[str, Any]) -> list[FormatOption]:
         for f in info.get("formats") or []
         if isinstance(f, dict) and _is_audio_only(f)
     ]
-
-
-def _tiktok_photo_info(
-    images: List[str], title: Optional[str], formats: list[FormatOption]
-) -> MediaInfo:
-    return MediaInfo(
-        title=title or "TikTok photo",
-        thumbnail=images[0],
-        platform="tiktok",
-        images=images,
-        formats=formats,
-        media_type="carousel" if len(images) > 1 else "image",
-    )
 
 
 def _get_base_opts(url: str = "") -> Dict[str, Any]:
