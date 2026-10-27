@@ -39,6 +39,7 @@ from app.services.adapters.common import _fetch_public_html
 from app.services.adapters.generic import (
     MAX_IMAGE_BYTES,
     MAX_IMAGES,
+    _audio_format,
     _audio_formats,
     _best_thumbnail_url,
     _build_ydl_opts,
