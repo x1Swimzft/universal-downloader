@@ -187,3 +187,29 @@ too).
 3. **`mediaops.py` + `common.py`** as shared modules, so adapters never import `extractor`.
 4. **2.F is verification, not implementation** — the updater already exists.
 5. **Facade stays** — `extractor.py` keeps its public names; only internals move.
+
+## 10. As built (2026-10-27) - approved deviations from sections 2, 5 and 9
+
+The migration landed with two boundary changes, both approved after the fan-out:
+
+1. **Orchestration stayed in the facade.** extract_info, inspect_entries, download_media
+   and get_direct_stream_url still live in extractor.py; generic.py holds only pure
+   helpers (yt-dlp options, info shaping, Pinterest, photo-post download). Reason: 68 test
+   patch sites call patch.object(extractor, "<name>"), so moving a caller would silently
+   bypass the patch. Four call-time seams keep those names resolvable through the facade:
+   _get_text (music), alidate_url_not_private (music, tiktok, generic),
+   _tiktok_fetch_html (tiktok), _fetch_pinterest_image (generic).
+   extractor.py went from 2,588 to ~700 lines.
+
+2. **common.py is broader than planned.** Besides HTTP/HTML helpers it also owns cookie
+   preference state (_cookie_preferences, set_cookie_preferences, get_cookie_preferences,
+   _validated_cookie_file) and the shared JSON extractors (_find_key,
+   _json_string_after, _json_object_after), because music, TikTok and Instagram all need
+   them and inter-adapter imports would be worse than one shared module.
+
+mediaops.py holds presets, ffmpeg args, post-processing, filenames and clip parsing, as
+planned. Adapter modules: music.py (Spotify/Apple plus the cover-art fix), 	iktok.py,
+instagram.py, generic.py.
+
+Still true: no adapter imports extractor at module load; the four seams import it lazily
+inside the function body, which is what keeps the patched names effective.

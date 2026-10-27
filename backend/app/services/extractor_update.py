@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import os
 import re
@@ -8,9 +9,11 @@ import zipfile
 from typing import Any, Dict, Optional
 
 import httpx
-import yt_dlp
 
-from app.services.extractor import USER_EXTRACTOR_DIR
+from app.services import ytdlp_loader
+
+yt_dlp = ytdlp_loader.import_ytdlp()
+USER_EXTRACTOR_DIR = ytdlp_loader.USER_EXTRACTOR_DIR
 
 PYPI_JSON_URL = "https://pypi.org/pypi/yt-dlp/json"
 MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
@@ -20,6 +23,11 @@ MAX_WHEEL_MEMBERS = 5000
 
 def _version_key(value: str) -> tuple:
     return tuple(int(part) for part in re.findall(r"\d+", str(value))) or (0,)
+
+
+def _sha256_matches(data: bytes, expected: str) -> bool:
+    """PyPI always publishes a digest; an absent one is not a pass."""
+    return bool(expected) and hashlib.sha256(data).hexdigest() == expected.lower()
 
 
 def _bundled_version() -> str:
@@ -127,9 +135,9 @@ async def update_extractor() -> Dict[str, Any]:
             "message": "yt-dlp is already up to date",
         }
 
-    wheel_url = next(
+    wheel = next(
         (
-            item.get("url")
+            item
             for item in release.get("urls") or []
             if item.get("packagetype") == "bdist_wheel"
             and str(item.get("filename", "")).startswith("yt_dlp-")
@@ -137,8 +145,10 @@ async def update_extractor() -> Dict[str, Any]:
         ),
         None,
     )
+    wheel_url = wheel.get("url") if wheel else None
     if not wheel_url:
         raise ValueError("PyPI did not return a yt-dlp wheel")
+    expected_sha256 = str(((wheel or {}).get("digests") or {}).get("sha256") or "").lower()
 
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         async with client.stream("GET", wheel_url) as response:
@@ -151,6 +161,9 @@ async def update_extractor() -> Dict[str, Any]:
                     raise ValueError("yt-dlp package download exceeded the 40 MB limit")
                 chunks.append(chunk)
     data = b"".join(chunks)
+
+    if not _sha256_matches(data, expected_sha256):
+        raise ValueError("Downloaded yt-dlp package failed its SHA-256 check")
 
     await asyncio.to_thread(_install_wheel, data)
     return {

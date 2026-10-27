@@ -15,26 +15,14 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin, quo
 from typing import Dict, Any, Optional, List
 import httpx
 
-USER_EXTRACTOR_DIR = Path(
-    os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
-) / "UniversalDownloader" / "bin"
+from app.services import ytdlp_loader
+
+USER_EXTRACTOR_DIR = ytdlp_loader.USER_EXTRACTOR_DIR
 
 # Prefer a user-installed yt-dlp wheel over the bundled copy, including in a
-# frozen backend where PyInstaller's importer would otherwise win.
-if (USER_EXTRACTOR_DIR / "yt_dlp" / "__init__.py").is_file():
-    from importlib.machinery import PathFinder
-
-    class _UserYtDlpFinder:
-        def find_spec(self, fullname, path=None, target=None):
-            if fullname == "yt_dlp" or fullname.startswith("yt_dlp."):
-                return PathFinder.find_spec(
-                    fullname, path if path is not None else [str(USER_EXTRACTOR_DIR)]
-                )
-            return None
-
-    sys.meta_path.insert(0, _UserYtDlpFinder())
-
-import yt_dlp
+# frozen backend where PyInstaller's importer would otherwise win. The loader
+# installs the finder before this import and quarantines a broken user copy.
+yt_dlp = ytdlp_loader.import_ytdlp()
 from yt_dlp.utils import download_range_func
 
 from app.models.schemas import MediaInfo, FormatOption, PreviewEntry

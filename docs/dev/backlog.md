@@ -33,3 +33,17 @@ feed), but each of these is still open.
    embedded cover art is never written.
 7. **TikTok `embed/v2` fixture not captured.** TikTok answered 503 "overload-protect
    triggered" during capture, so that shape is still only covered by synthetic tests.
+
+## 2.F extractor updater - resolved 2026-10-27
+
+- Import order fixed: `services/ytdlp_loader.py` installs the user-copy finder before
+  `yt_dlp` is imported, so a freshly installed wheel is active in the same process.
+- Corrupt user copy can no longer brick startup: `yt_dlp/__init__.py` and `version.py`
+  are compile-checked before activation; a broken copy is renamed to
+  `yt_dlp.broken-<timestamp>` (with a `.reason.txt`) and the bundled copy is used.
+  A copy that fails at import time is quarantined and the import retried.
+- Wheel SHA-256 is now compared against PyPI's `digests.sha256` before install.
+
+Still open (not blocking): no total download deadline or progress for the wheel, no cancel,
+no recovery of `yt_dlp.backup` after a crash, and a stale user copy still shadows a newer
+bundled copy by design.
