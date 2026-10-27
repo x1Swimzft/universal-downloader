@@ -30,6 +30,7 @@ SAMPLES: List[Dict[str, str]] = [
 ]
 
 PROBE_TIMEOUT = 30.0
+LAST_RESULT: List[Dict[str, Any]] = []
 
 
 async def _probe(platform: str, url: str) -> Dict[str, Any]:
@@ -53,7 +54,9 @@ async def _probe(platform: str, url: str) -> Dict[str, Any]:
 @router.get("/platforms")
 async def platform_health() -> Dict[str, Any]:
     """Run every sample probe in parallel; one failure never hides the others."""
+    global LAST_RESULT
     results = await asyncio.gather(
         *(_probe(sample["platform"], sample["url"]) for sample in SAMPLES)
     )
-    return {"results": list(results)}
+    LAST_RESULT = list(results)
+    return {"results": LAST_RESULT}

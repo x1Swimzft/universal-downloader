@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app.api.diagnostics import router as diagnostics_router
 from app.api.health_platforms import router as health_platforms_router
 from app.api.routes import router
 from app.services.storage import cleanup_old_files
@@ -117,6 +118,7 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(health_platforms_router)
+app.include_router(diagnostics_router)
 
 
 @app.get("/health")

@@ -564,6 +564,16 @@ export interface PlatformHealthResult {
   title?: string;
 }
 
+export async function getDiagnostics(appVersion: string): Promise<Record<string, unknown>> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(
+    `${getApiBase()}/api/system/diagnostics?app_version=${encodeURIComponent(appVersion)}`,
+    { headers: authHeaders }
+  );
+  if (!res.ok) throw new Error("Diagnostics unavailable");
+  return res.json();
+}
+
 export async function checkPlatformHealth(): Promise<PlatformHealthResult[]> {
   const authHeaders = await getAuthHeaders();
   const res = await fetch(`${getApiBase()}/api/health/platforms`, {

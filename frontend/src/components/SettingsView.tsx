@@ -8,12 +8,16 @@ import {
   CookieBrowser,
   ExtractorStatus,
   getExtractorStatus,
+  getDiagnostics,
   installAppUpdate,
   PlatformHealthResult,
   UpdateCheckResult,
   updateExtractor,
 } from "../lib/api";
 import { SettingRow } from "./SettingRow";
+
+// Single source for the version shown in Settings and in diagnostics.
+const APP_VERSION = "0.7.1";
 import { Switch } from "./Switch";
 import {
   AccentColor,
@@ -128,6 +132,7 @@ export function SettingsView({
   const [installingAppUpdate, setInstallingAppUpdate] = useState(false);
   const [platformHealth, setPlatformHealth] = useState<PlatformHealthResult[] | null>(null);
   const [checkingPlatforms, setCheckingPlatforms] = useState(false);
+  const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -203,6 +208,17 @@ export function SettingsView({
       setPlatformHealth([]);
     } finally {
       setCheckingPlatforms(false);
+    }
+  };
+
+  const handleCopyDiagnostics = async () => {
+    try {
+      const snapshot = await getDiagnostics(APP_VERSION);
+      const text = JSON.stringify(snapshot, null, 2);
+      await navigator.clipboard.writeText(text);
+      setDiagnosticsMessage("Diagnostics copied - no cookies or tokens included.");
+    } catch {
+      setDiagnosticsMessage("Could not copy diagnostics. Try again.");
     }
   };
 
@@ -305,7 +321,7 @@ export function SettingsView({
       <div className="group" aria-label="App updates">
         <SettingRow
           title="App updates"
-          subtitle="Universal Downloader v0.7.1"
+          subtitle={`Universal Downloader v${APP_VERSION}`}
         >
           {appUpdate?.status === "available" ? (
             <button
@@ -355,6 +371,19 @@ export function SettingsView({
                 )
                 .join("  ·  ")
             : ""}
+        </div>
+      </div>
+      <div className="group" aria-label="Diagnostics">
+        <SettingRow
+          title="Diagnostics"
+          subtitle="Copy app, OS and extractor versions plus the last check result"
+        >
+          <button type="button" className="btn sm" onClick={handleCopyDiagnostics}>
+            Copy diagnostics
+          </button>
+        </SettingRow>
+        <div className="settings-note" aria-live="polite">
+          {diagnosticsMessage}
         </div>
       </div>
       <div className="group">
