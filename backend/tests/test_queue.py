@@ -412,7 +412,8 @@ class TestQueueAudioDestinations(unittest.IsolatedAsyncioTestCase):
             self.temp_dir, "Road Trip 2026", "01 - Artist - Song.mp3"
         )
         self.assertEqual(item.status, "completed")
-        self.assertEqual(item.filename, expected)
+        # Windows runners can hand back an 8.3 short path (RUNNER~1); compare real paths.
+        self.assertEqual(os.path.realpath(item.filename), os.path.realpath(expected))
         self.assertTrue(os.path.exists(expected))
 
     async def test_save_in_subfolder_false_writes_directly_to_save_dir(self):
@@ -424,7 +425,8 @@ class TestQueueAudioDestinations(unittest.IsolatedAsyncioTestCase):
             await self.queue._worker(item.id)
 
         expected = os.path.join(self.temp_dir, "01 - Artist - Song.mp3")
-        self.assertEqual(item.filename, expected)
+        # Windows runners can hand back an 8.3 short path (RUNNER~1); compare real paths.
+        self.assertEqual(os.path.realpath(item.filename), os.path.realpath(expected))
         self.assertTrue(os.path.exists(expected))
         self.assertFalse(os.path.isdir(os.path.join(self.temp_dir, "Road Trip 2026")))
 
