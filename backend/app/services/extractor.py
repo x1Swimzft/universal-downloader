@@ -142,6 +142,8 @@ _ERROR_MESSAGES = {
     "RATE_LIMIT": "Rate limited by the site - wait a moment, then retry, or enable Browser Cookies in Settings.",
     "NETWORK_TRANSIENT": "Network problem - check your connection, then retry.",
     "UNSUPPORTED_URL": "This link is unsupported or the media is unavailable.",
+    "LINK_EXPIRED": "This link has expired - request a fresh link and try again.",
+    "PLATFORM_CHANGED": "The site changed its page and this version cannot read it. Update the app, then retry.",
 }
 
 _SETTINGS_ACTION_CODES = {"AUTH_403", "COOKIE_REQUIRED", "COOKIE_LOCKED", "RATE_LIMIT"}
@@ -196,6 +198,28 @@ def classify_error(message: str, url: str = "") -> str:
         return "COOKIE_REQUIRED"
     if "429" in text or "rate limit" in lower or "too many requests" in lower:
         return "RATE_LIMIT"
+    if any(
+        hint in lower
+        for hint in (
+            "link has expired",
+            "url has expired",
+            "link expired",
+            "no longer valid",
+            "410 gone",
+        )
+    ):
+        return "LINK_EXPIRED"
+    if any(
+        hint in lower
+        for hint in (
+            "failed to parse",
+            "unable to parse",
+            "unexpected response",
+            "extractor is out of date",
+            "no media data found",
+        )
+    ):
+        return "PLATFORM_CHANGED"
     if (
         any(
             hint in lower

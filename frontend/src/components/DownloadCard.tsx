@@ -16,6 +16,8 @@ const ERROR_HINTS: Record<string, string> = {
   RATE_LIMIT: "Rate limited by the site - wait a moment, then retry.",
   NETWORK_TRANSIENT: "Network problem - check your connection, then retry.",
   UNSUPPORTED_URL: "This link is unsupported or the media is unavailable.",
+  LINK_EXPIRED: "This link has expired - request a fresh link and try again.",
+  PLATFORM_CHANGED: "The site changed its page - update the app, then retry.",
 };
 
 const SETTINGS_ERROR_CODES = new Set(["AUTH_403", "COOKIE_REQUIRED", "RATE_LIMIT"]);
