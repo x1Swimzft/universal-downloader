@@ -47,3 +47,13 @@ feed), but each of these is still open.
 Still open (not blocking): no total download deadline or progress for the wheel, no cancel,
 no recovery of `yt_dlp.backup` after a crash, and a stale user copy still shadows a newer
 bundled copy by design.
+
+## Release process - 2026-10-27
+
+- **Stale ackend-engine.exe can ship unnoticed.** `desktop/backend-engine` is a prebuilt
+  PyInstaller folder and `electron-builder` copies it verbatim; nothing in
+  `verify-release` compares it to the Python source, so the first 0.8.0 package shipped a
+  backend that predated Phase 2 (the new endpoints 404'd). Rebuild with
+  `pyinstaller backend-engine.spec` and copy `backend/dist/backend-engine` into
+  `desktop/backend-engine` before every package. Upgrade: give the backend an
+  `APP_VERSION` and make `verify-release` compare it, or hash the engine in the guard.
