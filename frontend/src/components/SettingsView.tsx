@@ -177,7 +177,7 @@ export function SettingsView({
     try {
       const result = await installAppUpdate();
       setAppUpdate({
-        status: result.status === "error" ? "error" : "available",
+        status: result.status === "installing" ? "available" : result.status,
         version: appUpdate?.version,
         message: result.message,
       });

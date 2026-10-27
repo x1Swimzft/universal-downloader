@@ -583,7 +583,7 @@ function registerIpcHandlers() {
         return {
           status: "available",
           version: latest,
-          message: `Version ${latest} is available on GitHub Releases.`,
+          message: `Version ${latest} is available.`,
         };
       }
       return {
@@ -619,7 +619,13 @@ function registerIpcHandlers() {
       };
     }
     try {
-      await autoUpdater.downloadUpdate();
+      const downloaded = await autoUpdater.downloadUpdate();
+      if (!Array.isArray(downloaded) || downloaded.length === 0) {
+        return {
+          status: "error",
+          message: "No downloaded update to install. Check for updates again.",
+        };
+      }
       // Quit, run the downloaded installer, relaunch this app.
       autoUpdater.quitAndInstall(false, true);
       return {
