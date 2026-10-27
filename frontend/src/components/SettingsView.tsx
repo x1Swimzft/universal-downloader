@@ -17,7 +17,7 @@ import {
 import { SettingRow } from "./SettingRow";
 
 // Single source for the version shown in Settings and in diagnostics.
-const APP_VERSION = "0.9.0";
+const APP_VERSION = "1.0.0";
 import { Switch } from "./Switch";
 import {
   AccentColor,
