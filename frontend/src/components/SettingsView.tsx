@@ -4,10 +4,12 @@ import {
   AUDIO_FILENAME_TEMPLATES,
   AudioFilenameTemplate,
   checkForAppUpdate,
+  checkPlatformHealth,
   CookieBrowser,
   ExtractorStatus,
   getExtractorStatus,
   installAppUpdate,
+  PlatformHealthResult,
   UpdateCheckResult,
   updateExtractor,
 } from "../lib/api";
@@ -124,6 +126,8 @@ export function SettingsView({
   const [appUpdate, setAppUpdate] = useState<UpdateCheckResult | null>(null);
   const [checkingAppUpdate, setCheckingAppUpdate] = useState(false);
   const [installingAppUpdate, setInstallingAppUpdate] = useState(false);
+  const [platformHealth, setPlatformHealth] = useState<PlatformHealthResult[] | null>(null);
+  const [checkingPlatforms, setCheckingPlatforms] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -188,6 +192,17 @@ export function SettingsView({
       });
     } finally {
       setInstallingAppUpdate(false);
+    }
+  };
+
+  const handleCheckPlatforms = async () => {
+    setCheckingPlatforms(true);
+    try {
+      setPlatformHealth(await checkPlatformHealth());
+    } catch {
+      setPlatformHealth([]);
+    } finally {
+      setCheckingPlatforms(false);
     }
   };
 
@@ -314,6 +329,32 @@ export function SettingsView({
         </SettingRow>
         <div className="settings-note" aria-live="polite">
           {appUpdate?.message || ""}
+        </div>
+      </div>
+      <div className="group" aria-label="Platform health">
+        <SettingRow
+          title="Platform health"
+          subtitle="Probe TikTok, Instagram and YouTube without downloading"
+        >
+          <button
+            type="button"
+            className="btn sm"
+            onClick={handleCheckPlatforms}
+            disabled={checkingPlatforms}
+          >
+            {checkingPlatforms ? "Testing…" : "Test platforms"}
+          </button>
+        </SettingRow>
+        <div className="settings-note" aria-live="polite">
+          {platformHealth
+            ? platformHealth
+                .map((item) =>
+                  item.ok
+                    ? `${item.platform}: ok (${item.duration_ms ?? 0} ms)`
+                    : `${item.platform}: ${item.error_code || "failed"}`
+                )
+                .join("  ·  ")
+            : ""}
         </div>
       </div>
       <div className="group">

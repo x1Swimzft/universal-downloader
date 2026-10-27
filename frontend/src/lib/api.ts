@@ -553,6 +553,27 @@ export async function updateExtractor(): Promise<ExtractorStatus> {
   return res.json();
 }
 
+export interface PlatformHealthResult {
+  platform: string;
+  url: string;
+  ok: boolean;
+  error_code?: string;
+  detail?: string;
+  duration_ms?: number;
+  media_type?: string;
+  title?: string;
+}
+
+export async function checkPlatformHealth(): Promise<PlatformHealthResult[]> {
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${getApiBase()}/api/health/platforms`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) throw new Error("Platform check failed");
+  const payload = await res.json();
+  return payload.results ?? [];
+}
+
 export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
   if (typeof window !== "undefined" && window.electronAPI?.checkForUpdate) {
     return window.electronAPI.checkForUpdate();
