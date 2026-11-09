@@ -48,3 +48,16 @@ Thumbs.db
 # Code signing secrets
 desktop/certs/
 *.pfx
+*.jks
+*.keystore
+
+# Android (mobile/)
+mobile/.gradle/
+mobile/.kotlin/
+mobile/local.properties
+mobile/build/
+mobile/app/build/
+mobile/release/
+mobile/*.apk
+mobile/*.aab
+mobile/.idea/
