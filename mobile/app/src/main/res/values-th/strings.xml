@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tagline">ทุกอย่างที่คัดลอก ดาวน์โหลดเก็บไว้ในเครื่อง</string>
+
+    <string name="nav_download">ดาวน์โหลด</string>
+    <string name="nav_queue">คิว</string>
+    <string name="nav_history">ประวัติ</string>
+    <string name="nav_settings">ตั้งค่า</string>
+
+    <string name="download_headline">วางลิงก์ รับไฟล์ทันที</string>
+    <string name="download_sub">วิดีโอและเสียงจาก YouTube, TikTok, Instagram, X และอีกกว่า 1,000 เว็บ</string>
+    <string name="url_label">ลิงก์</string>
+    <string name="url_hint">https://…</string>
+    <string name="paste">วาง</string>
+    <string name="paste_empty">คลิปบอร์ดว่างอยู่</string>
+    <string name="analyze">วิเคราะห์</string>
+    <string name="analyzing">กำลังวิเคราะห์…</string>
+    <string name="format_label">รูปแบบ</string>
+    <string name="quality_label">คุณภาพ</string>
+    <string name="btn_download">ดาวน์โหลด</string>
+    <string name="cookies_hint">Instagram และวิดีโอส่วนตัวต้องใช้ไฟล์ cookies.txt นำเข้าได้ในหน้าตั้งค่า</string>
+
+    <string name="err_url_empty">วางลิงก์ก่อนครับ</string>
+    <string name="err_url_invalid">ลิงก์นี้ดูไม่ถูกต้อง</string>
+    <string name="err_playlist">ยังไม่รองรับเพลย์ลิสต์ — วางลิงก์วิดีโอทีละรายการ</string>
+    <string name="err_analyze">อ่านลิงก์ไม่ได้ ตรวจสอบ URL แล้วลองอีกครั้ง</string>
+    <string name="err_network">เครือข่ายมีปัญหา ตรวจสอบการเชื่อมต่อแล้วลองใหม่</string>
+    <string name="err_login">เว็บนี้ต้องเข้าสู่ระบบ — ล็อกอินหรือนำเข้า cookies.txt ในหน้าตั้งค่า</string>
+    <string name="err_private">วิดีโอนี้เป็นส่วนตัวหรือสำหรับสมาชิกเท่านั้น</string>
+    <string name="err_unavailable">วิดีโอนี้ไม่พร้อมใช้งานแล้ว</string>
+    <string name="err_cookies">เว็บปฏิเสธคำขอ ลองนำเข้า cookies.txt ชุดใหม่</string>
+    <string name="err_storage">เขียนไฟล์ไม่ได้ ตรวจสอบพื้นที่ว่างแล้วลองใหม่</string>
+    <string name="err_forbidden">เว็บไซต์บล็อกการดาวน์โหลด — อัปเดต yt-dlp ในหน้าตั้งค่ามักจะแก้ได้</string>
+    <string name="err_unsupported">ลิงก์นี้ยังไม่รองรับ — ลองอัปเดต yt-dlp ในหน้าตั้งค่า</string>
+    <string name="err_engine">เอนจินดาวน์โหลดขัดข้อง ลองอัปเดต yt-dlp ในหน้าตั้งค่า</string>
+    <string name="err_unknown">เกิดข้อผิดพลาด ลองอีกครั้ง</string>
+
+    <string name="queue_title">คิว</string>
+    <string name="queue_empty_title">ยังไม่มีงานในคิว</string>
+    <string name="queue_empty_body">งานที่เริ่มดาวน์โหลดจะแสดงที่นี่</string>
+    <string name="queue_clear_finished">ล้างงานที่เสร็จแล้ว</string>
+
+    <string name="status_queued">รอคิว</string>
+    <string name="status_downloading">กำลังดาวน์โหลด</string>
+    <string name="status_processing">กำลังประมวลผล</string>
+    <string name="status_done">เสร็จแล้ว</string>
+    <string name="status_failed">ล้มเหลว</string>
+    <string name="status_canceled">ยกเลิกแล้ว</string>
+
+    <string name="action_cancel">ยกเลิก</string>
+    <string name="action_retry">ลองใหม่</string>
+    <string name="action_remove">ลบ</string>
+    <string name="action_open">เปิด</string>
+    <string name="action_share">แชร์</string>
+    <string name="action_ok">ตกลง</string>
+    <string name="action_delete">ลบ</string>
+    <string name="eta_left">เหลือ %1$d วินาที</string>
+
+    <string name="history_title">ประวัติ</string>
+    <string name="history_empty_title">ยังไม่มีประวัติ</string>
+    <string name="history_empty_body">ไฟล์ที่เสร็จแล้วจะถูกบันทึกไว้ที่ Download/Universal Downloader</string>
+    <string name="history_clear">ล้างประวัติ</string>
+    <string name="history_clear_message">ลบรายการประวัติทั้งหมดหรือไม่? ไฟล์ในเครื่องยังอยู่</string>
+
+    <string name="settings_title">ตั้งค่า</string>
+    <string name="section_language">ภาษา</string>
+    <string name="language_system">ตามระบบ</string>
+    <string name="language_en">English</string>
+    <string name="language_th">ไทย</string>
+    <string name="section_downloads">การดาวน์โหลด</string>
+    <string name="setting_default_format">รูปแบบเริ่มต้น</string>
+    <string name="setting_video_quality">คุณภาพวิดีโอ</string>
+    <string name="setting_audio_quality">คุณภาพเสียง</string>
+    <string name="setting_concurrent">ดาวน์โหลดพร้อมกัน</string>
+    <string name="setting_clipboard">อ่านคลิปบอร์ดเมื่อเปิดแอป</string>
+    <string name="setting_clipboard_desc">เติมลิงก์ให้อัตโนมัติเมื่อกลับเข้าแอป</string>
+    <string name="section_cookies">คุกกี้</string>
+    <string name="cookies_import">นำเข้า cookies.txt</string>
+    <string name="cookies_none">ยังไม่มีไฟล์คุกกี้</string>
+    <string name="cookies_loaded">โหลด cookies.txt แล้ว</string>
+    <string name="cookies_desc">จำเป็นสำหรับ Instagram และวิดีโอส่วนตัว</string>
+    <string name="section_engine">เอนจิน</string>
+    <string name="engine_version">เวอร์ชัน yt-dlp</string>
+    <string name="engine_update">อัปเดต yt-dlp</string>
+    <string name="engine_updating">กำลังอัปเดต…</string>
+    <string name="engine_updated">เป็นเวอร์ชันล่าสุดแล้ว</string>
+    <string name="engine_update_done">อัปเดต yt-dlp แล้ว</string>
+    <string name="engine_update_failed">อัปเดตไม่สำเร็จ: %1$s</string>
+    <string name="section_storage">ที่เก็บไฟล์</string>
+    <string name="clear_temp">ล้างไฟล์ชั่วคราว</string>
+    <string name="temp_cleared">ล้างไฟล์ชั่วคราวแล้ว</string>
+    <string name="section_about">เกี่ยวกับ</string>
+    <string name="about_version">เวอร์ชัน %1$s</string>
+    <string name="about_license">ขับเคลื่อนด้วย yt-dlp และ FFmpeg สัญญา GPL-3.0</string>
+    <string name="about_folder">บันทึกไว้ที่ Download/Universal Downloader</string>
+    <string name="quality_best">ดีที่สุด</string>
+
+    <string name="notif_channel_name">ดาวน์โหลด</string>
+    <string name="notif_channel_desc">ความคืบหน้าและผลการดาวน์โหลด</string>
+    <string name="notif_progress_title">กำลังดาวน์โหลด %1$d ไฟล์</string>
+    <string name="notif_progress_text">%1$d%% · %2$s</string>
+    <string name="notif_done_title">ดาวน์โหลดเสร็จแล้ว</string>
+    <string name="notif_failed_title">ดาวน์โหลดล้มเหลว</string>
+    <string name="notif_cancel_all">ยกเลิกทั้งหมด</string>
+    <string name="permission_notifications">อนุญาตการแจ้งเตือนเพื่อติดตามความคืบหน้า</string>
+</resources>
