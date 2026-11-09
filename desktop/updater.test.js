@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { checkForUpdate, installUpdate, withTimeout, activeJobCount, MESSAGES } = require("./updater");
+const { checkForUpdate, installUpdate, withTimeout, activeJobCount, countActiveJobs, MESSAGES } = require("./updater");
 
 function fakeUpdater(overrides = {}) {
   const calls = { quit: 0 };
@@ -206,4 +206,53 @@ test("activeJobCount counts queued and downloading jobs only", () => {
   assert.equal(activeJobCount([{ status: "downloading" }, { status: "downloading" }]), 2);
   assert.equal(activeJobCount(null), 0);
   assert.equal(activeJobCount({ jobs: [] }), 0);
+});
+
+test("countActiveJobs reads /api/queue and treats failures as zero", async () => {
+  assert.equal(
+    await countActiveJobs(async (path) => {
+      assert.equal(path, "/api/queue");
+      return {
+        status: 200,
+        body: {
+          jobs: [
+            { status: "downloading" },
+            { status: "queued" },
+            { status: "done" },
+          ],
+        },
+      };
+    }),
+    2
+  );
+  assert.equal(await countActiveJobs(async () => ({ status: 503, body: {} })), 0);
+  assert.equal(
+    await countActiveJobs(async () => {
+      throw new Error("backend down");
+    }),
+    0
+  );
+});
+
+test("install warning uses the backend queue count", async () => {
+  let seen = null;
+  const result = await installUpdate({
+    app: packagedApp,
+    autoUpdater: fakeUpdater(),
+    dialog: {
+      showMessageBox: async (options) => {
+        seen = options;
+        return { response: 1 };
+      },
+    },
+    scheduleQuit: () => {},
+    countActiveJobs: () =>
+      countActiveJobs(async () => ({
+        status: 200,
+        body: { jobs: [{ status: "downloading" }, { status: "downloading" }] },
+      })),
+  });
+
+  assert.equal(result.status, "installing");
+  assert.match(seen.detail, /2 downloads/);
 });

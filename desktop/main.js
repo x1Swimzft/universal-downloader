@@ -18,7 +18,7 @@ const net = require("net");
 const http = require("http");
 const fs = require("fs");
 
-const { checkForUpdate, installUpdate } = require("./updater");
+const { checkForUpdate, countActiveJobs, installUpdate } = require("./updater");
 
 const appSessionToken = crypto.randomBytes(32).toString("hex");
 const APP_USER_MODEL_ID = "com.universaldownloader.app";
@@ -283,6 +283,42 @@ function postBackendJson(pathname, payload) {
       req.destroy(new Error("Quick fetch timed out"));
     });
     req.write(data);
+    req.end();
+  });
+}
+
+function getBackendJson(pathname) {
+  return new Promise((resolve, reject) => {
+    if (!activeBackendPort) {
+      return reject(new Error("Backend is not ready"));
+    }
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: activeBackendPort,
+        path: pathname,
+        method: "GET",
+        headers: { "X-App-Token": appSessionToken },
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf-8");
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          let parsed = {};
+          try {
+            parsed = JSON.parse(body);
+          } catch (_) {}
+          resolve({ status: res.statusCode || 0, body: parsed });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.setTimeout(2000, () => {
+      req.destroy(new Error("Backend request timed out"));
+    });
     req.end();
   });
 }
@@ -566,6 +602,7 @@ function registerIpcHandlers() {
       app,
       autoUpdater,
       dialog,
+      countActiveJobs: () => countActiveJobs(getBackendJson),
       // Give the IPC reply time to reach the renderer before the window closes.
       scheduleQuit: (fn) => setTimeout(fn, 100),
     })

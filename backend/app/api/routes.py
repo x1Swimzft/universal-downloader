@@ -415,6 +415,11 @@ async def delete_queue_item(job_id: str):
     return {"cancelled": existed, "job_id": job_id}
 
 
+@router.get("/queue")
+async def get_queue():
+    return {"jobs": queue_mgr.snapshot()}
+
+
 @router.get("/queue/stream")
 async def get_queue_stream():
     return StreamingResponse(

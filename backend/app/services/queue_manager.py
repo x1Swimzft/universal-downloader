@@ -540,10 +540,13 @@ class QueueManager:
             await self.broadcast()
             self.start_worker()
 
+    def snapshot(self):
+        return [asdict(item) for item in self.items.values()]
+
     async def broadcast(self):
         if not self._subscribers:
             return
-        payload = json.dumps([asdict(item) for item in self.items.values()])
+        payload = json.dumps(self.snapshot())
         msg = f"data: {payload}\n\n"
         for q in list(self._subscribers):
             try:
@@ -555,7 +558,7 @@ class QueueManager:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         self._subscribers.add(q)
         try:
-            initial = json.dumps([asdict(item) for item in self.items.values()])
+            initial = json.dumps(self.snapshot())
             yield f"data: {initial}\n\n"
             while True:
                 msg = await q.get()

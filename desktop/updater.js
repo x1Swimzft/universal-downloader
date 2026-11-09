@@ -36,6 +36,15 @@ function activeJobCount(payload) {
     .length;
 }
 
+async function countActiveJobs(fetchJson) {
+  try {
+    const { status, body } = await fetchJson("/api/queue");
+    return status >= 200 && status < 300 ? activeJobCount(body) : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 async function checkForUpdate({ app, autoUpdater, timeoutMs = CHECK_TIMEOUT_MS }) {
   const currentVersion = app.getVersion();
   if (!app.isPackaged || !autoUpdater) {
@@ -147,6 +156,7 @@ module.exports = {
   installUpdate,
   withTimeout,
   activeJobCount,
+  countActiveJobs,
   CHECK_TIMEOUT_MS,
   DOWNLOAD_TIMEOUT_MS,
   MESSAGES,
