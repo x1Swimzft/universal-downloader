@@ -58,3 +58,13 @@ jobs:
             android-release/app-arm64-v8a-debug.apk \
             android-release/app-x86_64-debug.apk \
             "android-release/SHA256SUMS-android-${VERSION}.txt"
+
+      - name: Verify no updater metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          if echo "$assets" | grep -qiE '^latest.*\.ya?ml$'; then
+            echo "Android release contains updater metadata" >&2
+            exit 1
+          fi
