@@ -949,6 +949,14 @@ class TestClipAndPresets(unittest.TestCase):
         self.assertEqual(ranges[0]["start_time"], 5)
         self.assertEqual(ranges[0]["end_time"], 12)
 
+    def test_best_quality_uses_the_highest_stream(self):
+        opts = _build_ydl_opts(
+            "mp4", "best", "%(id)s.%(ext)s", lambda _d: None,
+            "https://example.com/v",
+        )
+        self.assertEqual(opts["format"], "bestvideo*+bestaudio/best")
+        self.assertEqual(opts["merge_output_format"], "mp4")
+
     def test_preset_arguments(self):
         edit = _preset_ffmpeg_args("edit_ready", "in.webm", "out.mp4")
         self.assertIn("libx264", edit)

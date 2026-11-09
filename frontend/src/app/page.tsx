@@ -137,6 +137,7 @@ function formatHistoryLabel(item: QueueItem): string {
   if (item.format === "m4a") return "M4A";
   if (item.format === "opus") return "OPUS";
   if (item.format === "mp3") return `MP3 ${item.quality.replace(/k$/i, "") || "320"}k`;
+  if (item.quality.toLowerCase() === "best") return "Best";
   return `${item.quality.replace(/p$/i, "") || "1080"}p`;
 }
 

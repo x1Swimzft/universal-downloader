@@ -360,6 +360,9 @@ def _build_ydl_opts(
         )
     else:  # mp4
         height = quality.rstrip("p") if quality else "1080"
+        if height.lower() == "best":
+            opts["format"] = "bestvideo*+bestaudio/best"
+            return opts
         if not height.isdigit():
             height = "1080"
         h = str(height)

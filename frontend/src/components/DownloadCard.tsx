@@ -43,6 +43,7 @@ export function DownloadCard({
         : "MP3 320k";
     }
     if (!item.quality) return "";
+    if (item.quality.toLowerCase() === "best") return "Best";
     return `${item.quality.replace(/p$/i, "")}p`;
   })();
   const progressPercent = Math.min(100, Math.max(0, item.progress));
