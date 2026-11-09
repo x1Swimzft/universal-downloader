@@ -162,6 +162,7 @@ universal-downloader/
 ├── desktop/       Electron shell, tray, updater, drag-out, backend supervisor
 ├── backend/       FastAPI + yt-dlp + FFmpeg sidecar engine
 ├── frontend/      Next.js 14 + TypeScript + Tailwind UI
+├── mobile/        Native Android app (Kotlin, Jetpack Compose, youtubedl-android)
 └── docs/assets/   README screenshots and review artwork
 ```
 
@@ -170,7 +171,35 @@ universal-downloader/
 | Desktop | Electron 33.4.11, system tray, single-instance lock, electron-updater |
 | Backend | Python 3.11, FastAPI, Uvicorn, APScheduler, yt-dlp |
 | Frontend | Next.js 14.2.35 static export, React 18, TypeScript, Tailwind CSS |
+| Mobile | Kotlin, Jetpack Compose, youtubedl-android 0.18.1, MediaStore, SQLite |
 | Media | Bundled FFmpeg Essentials, FFprobe, Node.js runtime |
+
+---
+
+## 📱 Android app (pre-release)
+
+A native Android build lives in [`mobile/`](mobile/README.md). Everything runs on the
+phone — no PC, no server, no uploads.
+
+- **Status:** pre-release, **debug-signed**, published as the
+  [`android-v1.0.0`](https://github.com/x1Swimzft/universal-downloader/releases/tag/android-v1.0.0)
+  GitHub pre-release. It is separate from the desktop feed and does not affect desktop updates.
+- **Requirements:** Android 10+ (minSdk 29), targetSdk 35, compileSdk 36. APKs are built for
+  `arm64-v8a` phones and `x86_64` emulators.
+- **Features:** single-link analysis; MP4 up to 1080p; MP3 320/192/128 kbps and M4A remux;
+  queue with progress, ETA, cancel, retry and 1–3 concurrent downloads; foreground service and
+  notifications; MediaStore save to `Download/Universal Downloader`; SQLite history;
+  `cookies.txt` import; Spotify track bridge; in-app yt-dlp update; share-sheet intake;
+  English and Thai UI.
+- **Known limits (v1):** one link at a time; playlists and channel URLs are rejected; no pause
+  (cancel and retry); no TikTok photo posts, Instagram carousels, Spotify albums/playlists, or
+  Apple Music matching; the queue is in-memory, so killing the app drops queued jobs; Spotify
+  resolves to a matching YouTube audio file.
+- **Build:** see [`mobile/README.md`](mobile/README.md). JDK 21 and Android SDK 36 are required;
+  CI builds and tests the module on every change under `mobile/`.
+- **License:** the APK bundles `youtubedl-android` 0.18.1 (GPL-3.0), so a distributed APK is
+  GPL-3.0. The desktop application remains MIT. See
+  [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ---
 

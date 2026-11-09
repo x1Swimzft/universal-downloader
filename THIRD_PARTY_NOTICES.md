@@ -2,8 +2,9 @@
 
 Universal Downloader's own code is MIT-licensed (see `LICENSE`). The installer
 and portable zip also contain the third-party software below, which remains
-under its own license. This list was drafted by hand: **regenerate the full
-dependency lists before each release** (see "Release checklist").
+under its own license. The Android APK additionally bundles `youtubedl-android`
+(section 2). This list was drafted by hand: **regenerate the full dependency
+lists before each release** (see "Release checklist").
 
 ## 1. FFmpeg / ffprobe — GPL v3
 
@@ -29,14 +30,30 @@ FFmpeg repository link and commit listed here. Libraries compiled into the
 build (x264, x265, etc.) are listed in the build's README and are available
 from their upstream projects.
 
-## 2. Application components
+## 2. Android APK — youtubedl-android — GPL-3.0
+
+- Files: `app-arm64-v8a-debug.apk`, `app-x86_64-debug.apk` (Android pre-releases)
+- Component: youtubedl-android 0.18.1 (`library` and `ffmpeg` artifacts)
+- License: GNU General Public License v3 — https://www.gnu.org/licenses/gpl-3.0.html
+- Copyright: the youtubedl-android authors and the projects it bundles,
+  including yt-dlp, Python, FFmpeg and QuickJS
+- Project / source code: https://github.com/yausername/youtubedl-android
+- App source and build instructions:
+  https://github.com/x1Swimzft/universal-downloader/tree/main/mobile
+
+`youtubedl-android` is linked into the APK, so the distributed APK is GPL-3.0.
+The desktop Electron application does not contain it and remains MIT. The
+corresponding source for the GPL-covered APK is the `mobile/` directory at the
+release tag plus the upstream repositories linked above.
+
+## 3. Application components
 
 | Component | Used for | License |
 |---|---|---|
-| yt-dlp | Media extraction (inside the backend engine) | The Unlicense (https://github.com/yt-dlp/yt-dlp) |
+| yt-dlp | Media extraction (inside the backend engine and the Android APK) | The Unlicense (https://github.com/yt-dlp/yt-dlp) |
 | Electron | Desktop shell | MIT (https://github.com/electron/electron). Chromium and other notices ship in `LICENSES.chromium.html`; do not remove it. |
 | electron-updater | Update scaffolding for future signed releases | MIT (https://github.com/electron-userland/electron-builder) |
-| Python 3.11 | Backend runtime (frozen) | PSF License |
+| Python 3.11 | Backend runtime (frozen) and Android engine runtime | PSF License |
 | PyInstaller | Freezing the backend | GPL-2.0 with a bootloader exception that allows distributing frozen apps under any license |
 | FastAPI, Pydantic | Backend API | MIT |
 | Starlette, Uvicorn, httpx | Backend server and HTTP client | BSD-3-Clause |
@@ -44,13 +61,15 @@ from their upstream projects.
 | certifi | SSL root certificates (shipped unmodified) | MPL-2.0 |
 | Next.js, React, Tailwind CSS | User interface | MIT |
 | Inter (variable) | UI typeface, bundled at `frontend/public/fonts/InterVariable.woff2` | SIL Open Font License 1.1 (https://github.com/rsms/inter) |
+| Jetpack Compose, AndroidX | Android UI and platform libraries | Apache-2.0 |
+| Coil | Android image loading | Apache-2.0 |
 
 certifi is distributed in binary form without modification under the Mozilla Public License 2.0 (MPL-2.0). Source code is available at https://github.com/certifi/python-certifi.
 
 Versions and the complete transitive list: see `third_party_python.md` and
 `third_party_node.md` generated for each release.
 
-## 3. Trademarks and disclaimer
+## 4. Trademarks and disclaimer
 
 YouTube, TikTok, Instagram, X, Facebook, SoundCloud and other names are
 trademarks of their owners and are used only to describe supported sites.
@@ -58,7 +77,7 @@ Universal Downloader is not affiliated with or endorsed by them. You are
 responsible for complying with the terms of the sites you download from and
 with copyright law. The software is provided for personal use.
 
-## 4. Release checklist (for the maintainer)
+## 5. Release checklist (for the maintainer)
 
 1. Python deps: `pip install pip-licenses`, then
    `pip-licenses --format=markdown --with-urls > third_party_python.md`
@@ -73,3 +92,6 @@ with copyright law. The software is provided for personal use.
 4. Keep the exact ffmpeg commit/build URL in this file in sync with the binary
    (`ffmpeg -version`). Consider uploading the matching source archive to the
    GitHub Release so the source stays available even if the build site changes.
+5. Android APK: confirm the release notes name `youtubedl-android` 0.18.1 as
+   GPL-3.0, link the `mobile/` source at the tag, and keep the pre-release
+   flagged as debug-signed until a keystore-backed release exists.
