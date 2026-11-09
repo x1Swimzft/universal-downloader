@@ -78,7 +78,15 @@ jobs:
 
       - name: Desktop dependencies
         working-directory: desktop
-        run: npm ci
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            npm ci
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "npm ci failed (attempt $attempt/3); retrying in 10s..."
+            Start-Sleep -Seconds 10
+          }
+          exit 1
 
       - name: Desktop updater tests
         working-directory: desktop

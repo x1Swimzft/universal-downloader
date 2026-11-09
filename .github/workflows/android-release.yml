@@ -30,7 +30,15 @@ jobs:
         working-directory: mobile
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+          # Retry covers Gradle distribution/CDN flakes; real failures still fail three times.
+          for attempt in 1 2 3; do
+            if ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace; then
+              exit 0
+            fi
+            echo "Gradle failed (attempt $attempt/3); retrying in 10s..." >&2
+            sleep 10
+          done
+          exit 1
 
       - name: Stage release assets
         shell: bash
