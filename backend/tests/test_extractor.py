@@ -1703,11 +1703,11 @@ class TestErrorSanitization(unittest.TestCase):
         self.assertIsNone(error_action("UNKNOWN"))
 
 
-# Fixtures in tests/fixtures were captured 2026-10-27 from live public pages and then
-# trimmed/sanitised (signed query values replaced with REDACTED). Known gaps: TikTok
-# embed/v2/<id> answered 503 "overload-protect triggered" (that shape stays covered by
-# TestTikTokPhoto above), and the desktop photo page now ships a shell without
-# imagePost/api-data (covered by the desktop fixture plus the fetch fallback test below).
+# Fixtures in tests/fixtures were captured from live public pages and then
+# trimmed/sanitised (signed query values replaced with REDACTED). The TikTok desktop and
+# mobile photo fixtures were captured 2026-10-27; the embed/v2 fixture was captured
+# 2026-11-09. The desktop photo page now ships a shell without imagePost/api-data
+# (covered by the desktop fixture plus the fetch fallback test below).
 FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
 
@@ -1736,6 +1736,23 @@ class TestCapturedTikTokFixtures(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("p19-common-sign", images[0])
         self.assertIn("x-signature=REDACTED", images[0])
         self.assertNotIn("J%2B", html)
+
+    def test_embed_v2_html_fixture(self):
+        html = _fixture("tiktok", "photo_embed_v2.html")
+        images, title = _parse_tiktok_photo_html(html)
+
+        self.assertEqual(len(images), 3)
+        self.assertEqual(len(set(images)), 3)
+        self.assertTrue(
+            images[0].startswith(
+                "https://p16-common-sign.tiktokcdn.com/tos-no1a-i-photomode-no/"
+                "2ad7b76051ee4df1a900e884b6e3891e~tplv-photomode-image.jpeg?"
+            )
+        )
+        # urlList keeps its order: the p19 mirror URL is never picked.
+        self.assertNotIn("p19-common-sign", images[0])
+        self.assertIn("x-signature=REDACTED", images[0])
+        self.assertIsNone(title)
 
     def test_desktop_html_fixture_is_a_shell(self):
         html = _fixture("tiktok", "photo_desktop.html")

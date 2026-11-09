@@ -25,14 +25,17 @@ feed), but each of these is still open.
    and relaunch are proven but the version bump is not. Validate when 0.7.2 ships from an
    installed 0.7.1.
 
-## v0.7.1 — extractor issues reported, not fixed
+## v0.7.1 — extractor issues (resolved)
 
-6. **Spotify cover art is always missing.** `_spotify_cover` (`backend/app/services/extractor.py:968`)
-   reads `coverArt`, but live embed entities carry artwork under `visualIdentity.image`.
-   Verified live: `_resolve_spotify()` returns `thumbnail: None` for a real track, so
-   embedded cover art is never written.
-7. **TikTok `embed/v2` fixture not captured.** TikTok answered 503 "overload-protect
-   triggered" during capture, so that shape is still only covered by synthetic tests.
+6. ~~**Spotify cover art is always missing.**~~ **Resolved before v1.0.0.** `_spotify_cover`
+   (`backend/app/services/adapters/music.py:177-204`) now falls back to `visualIdentity.image`
+   when `coverArt` is absent. Covered by `backend/tests/test_adapter_music.py` (unit selection
+   plus the captured embed fixture). No v1.1 code change.
+7. ~~**TikTok `embed/v2` fixture not captured.**~~ **Resolved 2026-11-09.** Captured live from
+   `https://www.tiktok.com/embed/v2/7508048429776407830` (HTTP 200, 30 images), trimmed to
+   three in `backend/tests/fixtures/tiktok/photo_embed_v2.html` with signed query values
+   redacted. Covered by `TestCapturedTikTokFixtures.test_embed_v2_html_fixture`; the embed
+   payload carries no title/desc, so the parser falls back to `None`.
 
 ## 2.F extractor updater - resolved 2026-10-27
 
