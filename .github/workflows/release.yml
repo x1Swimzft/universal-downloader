@@ -82,22 +82,32 @@ jobs:
 
       - name: Desktop updater tests
         working-directory: desktop
-        run: npm test
+        run: |
+          npm test
+          npm run test:e2e
 
       - name: Package (no publish)
         working-directory: desktop
-        run: npx electron-builder --publish never
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -match '-beta') {
+            npm run dist:beta
+          } else {
+            npx electron-builder --publish never
+          }
 
       - name: Stage release assets
         shell: pwsh
         run: |
           $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          $channelFile = if ($version -match '-beta') { "beta.yml" } else { "latest.yml" }
           New-Item -ItemType Directory -Force release | Out-Null
           Copy-Item "desktop/dist-release/Universal Downloader Setup $version.exe" "release/Universal-Downloader-Setup-$version.exe" -Force
           Copy-Item "desktop/dist-release/Universal Downloader Setup $version.exe.blockmap" "release/Universal-Downloader-Setup-$version.exe.blockmap" -Force
           Copy-Item "desktop/dist-release/Universal Downloader-$version-win.zip" "release/Universal.Downloader-$version-win.zip" -Force
-          Copy-Item "desktop/dist-release/latest.yml" release/latest.yml -Force
-          $names = "Universal-Downloader-Setup-$version.exe","Universal-Downloader-Setup-$version.exe.blockmap","Universal.Downloader-$version-win.zip","latest.yml"
+          Copy-Item "desktop/dist-release/$channelFile" "release/$channelFile" -Force
+          $names = "Universal-Downloader-Setup-$version.exe","Universal-Downloader-Setup-$version.exe.blockmap","Universal.Downloader-$version-win.zip",$channelFile
           $lines = foreach ($n in $names) { "{0}  {1}" -f (Get-FileHash "release/$n" -Algorithm SHA256).Hash, $n }
           [IO.File]::WriteAllText("$PWD/release/SHA256SUMS-$version.txt", ($lines -join "`n") + "`n", (New-Object System.Text.UTF8Encoding($false)))
 
@@ -117,10 +127,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
-          gh release create "v$version" --draft --target $env:GITHUB_SHA `
-            --title "v$version" --notes-file "docs/releases/v$version.md" `
+          $channelFile = if ($version -match '-beta') { "beta.yml" } else { "latest.yml" }
+          $ghArgs = @("release", "create", "v$version", "--draft", "--target", $env:GITHUB_SHA, "--title", "v$version", "--notes-file", "docs/releases/v$version.md")
+          if ($version -match '-beta') { $ghArgs += "--prerelease" }
+          gh @ghArgs `
             "release/Universal-Downloader-Setup-$version.exe" `
             "release/Universal-Downloader-Setup-$version.exe.blockmap" `
             "release/Universal.Downloader-$version-win.zip" `
-            "release/latest.yml" `
+            "release/$channelFile" `
             "release/SHA256SUMS-$version.txt"

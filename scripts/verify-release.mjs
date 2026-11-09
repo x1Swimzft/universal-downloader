@@ -57,7 +57,7 @@ async function hashFile(file) {
   });
 }
 
-// shortcut: flat electron-builder latest.yml shape only; swap in a YAML parser if nesting grows.
+// shortcut: flat electron-builder update manifest shape only; swap in a YAML parser if nesting grows.
 function parseLatestYml(text) {
   const doc = { files: [] };
   const unquote = (v) => v.replace(/^(['"])(.*)\1$/, '$2');
@@ -87,34 +87,42 @@ function parseLatestYml(text) {
   return doc;
 }
 
-// --- latest.yml -----------------------------------------------------------
-const ymlPath = join(releaseDir, 'latest.yml');
+// --- update manifest (latest.yml stable, beta.yml prerelease) -------------
+const betaPath = join(releaseDir, 'beta.yml');
+const manifestName = existsSync(betaPath) ? 'beta.yml' : 'latest.yml';
+const ymlPath = join(releaseDir, manifestName);
 let yml = null;
 if (!existsSync(ymlPath)) {
-  fail('latest.yml is missing from the release directory');
+  fail(`${manifestName} is missing from the release directory`);
 } else {
   try {
     const doc = parseLatestYml(readText(ymlPath).text);
-    if (!doc.version && !doc.files?.length) throw new Error('not a latest.yml (no version or files)');
+    if (!doc.version && !doc.files?.length) throw new Error(`not a ${manifestName} (no version or files)`);
     yml = doc;
-    pass('latest.yml parses');
+    pass(`${manifestName} parses`);
   } catch (err) {
-    fail(`latest.yml does not parse: ${err.message}`);
+    fail(`${manifestName} does not parse: ${err.message}`);
   }
 }
 
 const version = yml?.version;
 const entry = yml?.files?.[0];
-if (yml && !version) fail('latest.yml has no version');
-if (yml && !entry) fail('latest.yml has no files[0] entry');
+if (yml && !version) fail(`${manifestName} has no version`);
+if (yml && !entry) fail(`${manifestName} has no files[0] entry`);
+if (version && manifestName === 'latest.yml' && String(version).includes('-')) {
+  fail(`latest.yml must not contain a prerelease version (${version}); use beta.yml`);
+}
+if (version && manifestName === 'beta.yml' && !String(version).includes('-beta')) {
+  fail(`beta.yml must contain a prerelease version (${version})`);
+}
 
 // --- 1. installer naming --------------------------------------------------
 const installerName = version ? `Universal-Downloader-Setup-${version}.exe` : null;
 if (yml && installerName) {
-  if (yml.path !== installerName) fail(`latest.yml path "${yml.path}" is not "${installerName}"`);
-  else pass(`latest.yml path is ${installerName}`);
-  if (entry?.url !== installerName) fail(`latest.yml files[0].url "${entry?.url}" is not "${installerName}"`);
-  else pass('latest.yml files[0].url matches path');
+  if (yml.path !== installerName) fail(`${manifestName} path "${yml.path}" is not "${installerName}"`);
+  else pass(`${manifestName} path is ${installerName}`);
+  if (entry?.url !== installerName) fail(`${manifestName} files[0].url "${entry?.url}" is not "${installerName}"`);
+  else pass(`${manifestName} files[0].url matches path`);
 }
 
 // --- 2. installer integrity ----------------------------------------------
@@ -125,16 +133,16 @@ if (installerName && !installerPath) {
 } else if (installerPath) {
   const size = statSync(installerPath).size;
   const expectedSize = Number(entry?.size ?? yml?.size);
-  if (!Number.isFinite(expectedSize)) fail('latest.yml has no usable installer size');
-  else if (size !== expectedSize) fail(`installer size ${size} != latest.yml size ${expectedSize}`);
+  if (!Number.isFinite(expectedSize)) fail(`${manifestName} has no usable installer size`);
+  else if (size !== expectedSize) fail(`installer size ${size} != ${manifestName} size ${expectedSize}`);
   else pass(`installer size ${size}`);
 
   const sums = await hashFile(installerPath);
   hashes.set(installerPath, sums);
   const expectedSha = entry?.sha512 ?? yml?.sha512;
-  if (!expectedSha) fail('latest.yml has no installer sha512');
+  if (!expectedSha) fail(`${manifestName} has no installer sha512`);
   else if (sums.sha512 !== expectedSha) fail(`installer sha512 mismatch: ${sums.sha512}`);
-  else pass('installer sha512 matches latest.yml');
+  else pass(`installer sha512 matches ${manifestName}`);
 }
 
 // --- 3. version consistency ----------------------------------------------
@@ -168,7 +176,7 @@ if (version) {
   for (const [label, res] of sources) {
     if (res.error) fail(res.error);
     else if (res.skip) pass(`version check skipped: ${res.skip}`);
-    else if (res.version !== version) fail(`${label} version ${res.version} != latest.yml ${version}`);
+    else if (res.version !== version) fail(`${label} version ${res.version} != ${manifestName} ${version}`);
     else pass(`${label} version ${res.version}`);
   }
 }
@@ -179,10 +187,10 @@ const required = version
       installerName,
       `${installerName}.blockmap`,
       `Universal-Downloader-${version}-win.zip`,
-      'latest.yml',
+      manifestName,
       `SHA256SUMS-${version}.txt`,
     ]
-  : ['latest.yml'];
+  : [manifestName];
 const located = new Map();
 for (const name of required) {
   const found = pathOf(name);
@@ -197,7 +205,7 @@ for (const name of required) {
 // --- 5. SHA256SUMS -------------------------------------------------------
 const role = (name) => {
   const base = name.trim().split(/[\\/]/).pop();
-  if (base === 'latest.yml') return 'latest.yml';
+  if (base === 'latest.yml' || base === 'beta.yml') return 'manifest';
   if (base.endsWith('.blockmap')) return 'blockmap';
   if (base.endsWith('.zip')) return 'zip';
   if (base.endsWith('.exe')) return 'installer';
@@ -210,7 +218,7 @@ if (sumsPath) {
   const byRole = new Map();
   for (const [name, file] of located) {
     const r = role(name);
-    if (r && r !== 'latest.yml') byRole.set(r, file);
+    if (r && r !== 'manifest') byRole.set(r, file);
   }
 
   const sums = readText(sumsPath);
@@ -235,7 +243,7 @@ if (sumsPath) {
     }
     seen.set(r, listed);
 
-    const target = r === 'latest.yml' ? join(releaseDir, 'latest.yml') : byRole.get(r);
+    const target = r === 'manifest' ? join(releaseDir, manifestName) : byRole.get(r);
     if (!target || !existsSync(target)) {
       fail(`SHA256SUMS lists ${listed} but no ${r} artifact was found`);
       continue;
@@ -275,7 +283,7 @@ if (notesPath && !existsSync(notesPath)) {
     if (actual !== expected) fail(`release notes sha256 mismatch for ${name}: ${actual}`);
     else pass(`notes sha256 ${name}`);
   }
-  for (const r of ['installer', 'blockmap', 'zip', 'latest.yml']) {
+  for (const r of ['installer', 'blockmap', 'zip', 'manifest']) {
     if (!rolesSeen.has(r)) fail(`release notes do not list a ${r} hash`);
   }
 }
@@ -325,7 +333,7 @@ if (!existsSync(engineExe)) {
     } else if (backend.version && stamp !== backend.version) {
       fail(`backend-engine stamp ${stamp} != backend APP_VERSION ${backend.version}`);
     } else if (version && stamp !== version) {
-      fail(`backend-engine stamp ${stamp} != latest.yml ${version}`);
+      fail(`backend-engine stamp ${stamp} != ${manifestName} ${version}`);
     } else {
       pass(`backend-engine stamp is ${stamp}`);
     }

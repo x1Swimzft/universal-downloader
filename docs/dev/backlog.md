@@ -6,10 +6,9 @@ Known gaps accepted knowingly. Not release blockers unless stated.
 
 1. ~~**No download timeout.**~~ **Resolved.** `desktop/updater.js` wraps `downloadUpdate()`
    in a 10-minute `withTimeout`; the timeout is unit-tested in `desktop/updater.test.js`.
-2. **Install does not wait for active downloads.** Partially addressed: `installUpdate`
-   accepts `countActiveJobs` and the dialog names the count, but `main.js` does not supply
-   it yet, so the dialog says a running download will stop without listing it. Still open
-   until the renderer or main process passes the queue count.
+2. ~~**Install does not wait for active downloads.**~~ **Resolved 2026-11-09.** `main.js`
+   passes `countActiveJobs`, which reads `GET /api/queue`; the install dialog names the
+   active count, and `desktop/updater.test.js` covers the warning path.
 3. ~~**Renderer may see a rejection on quit.**~~ **Resolved.** `installUpdate` schedules
    `quitAndInstall` instead of calling it before the IPC reply; covered by the
    "replies before quitting" test.
@@ -57,11 +56,11 @@ bundled copy by design.
   the stamp is missing or differs from `APP_VERSION`/`latest.yml`. The mtime guard remains
   as a second check. (The first 0.8.0 package shipped a backend that predated Phase 2.)
 
-## Update channels - deferred to v1.1
+## Update channels - beta channel 2026-11-09
 
-Phase 4.C kept the stable feed untouched: no uild.publish.channel change and no
-artifact naming change for 1.0.0, so `latest.yml` stays byte-compatible for
-0.9.0 -> 1.0.0. A beta channel (`beta.yml` only when the version contains `-beta`)
-needs its own electron-builder config change and an end-to-end feed test; doing it in the
-same release as the 1.0.0 updater bump would put the stable path at risk for no user
-benefit. Revisit in v1.1 with the local harness in `docs/dev/auto-update-test.md`.
+`npm run dist:beta` sets `publish.channel=beta` and `releaseType=prerelease`, so a
+`-beta` version writes `beta.yml` and is published as a GitHub prerelease. Stable builds
+keep `latest.yml`; `electron-updater` enables `allowPrerelease` automatically for a client
+whose own version has a prerelease. `verify-release` reads `beta.yml` when present and
+rejects a `latest.yml` that contains a prerelease version. The local harness covers
+stable/beta feed isolation.

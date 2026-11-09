@@ -21,6 +21,14 @@ the main-process updater functions. It injects the updater and never runs a real
 so it is safe on a dev machine. The packaged-app procedure below remains the only way to
 verify the NSIS install and relaunch.
 
+## Beta channel
+
+A version containing `-beta` builds with `npm run dist:beta`, which sets
+`publish.channel=beta` and `releaseType=prerelease`. That writes `beta.yml` instead of
+`latest.yml`; the release workflow attaches `beta.yml` and creates a prerelease. Stable
+builds keep `latest.yml` untouched. A client whose own version has a prerelease enables
+`allowPrerelease` automatically; a stable client never reads `beta.yml`.
+
 ---
 
 ## 1. Current updater facts

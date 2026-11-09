@@ -8,6 +8,7 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:beta": "electron-builder --publish never --config.publish.channel=beta --config.publish.releaseType=prerelease",
     "test": "node --test updater.test.js",
     "test:e2e": "node --test e2e/update.test.js",
     "verify-release": "node ../scripts/verify-release.mjs"
