@@ -51,9 +51,7 @@ def user_copy_present() -> bool:
     return (user_package_dir() / "__init__.py").is_file()
 
 
-def user_copy_problem() -> Optional[str]:
-    """Return why the user copy cannot be trusted, or None when it is sane."""
-    package = user_package_dir()
+def _package_problem(package: Path) -> Optional[str]:
     for name in _REQUIRED_FILES:
         if not (package / name).is_file():
             return f"missing {name}"
@@ -65,9 +63,16 @@ def user_copy_problem() -> Optional[str]:
     return None
 
 
-def quarantine(reason: str = "") -> Optional[str]:
+def user_copy_problem() -> Optional[str]:
+    """Return why the user copy cannot be trusted, or None when it is sane."""
+    return _package_problem(user_package_dir())
+
+
+def quarantine(
+    reason: str = "", package: Optional[Path] = None
+) -> Optional[str]:
     """Rename the broken copy out of the way so it stops shadowing the bundle."""
-    package = user_package_dir()
+    package = package or user_package_dir()
     if not package.exists():
         return None
     target = package.with_name(f"yt_dlp.broken-{time.strftime('%Y%m%d-%H%M%S')}")
@@ -85,11 +90,34 @@ def quarantine(reason: str = "") -> Optional[str]:
     return str(target)
 
 
+def recover_backup(root: Optional[Path] = None) -> Optional[str]:
+    """Restore a yt_dlp.backup left by a crashed update, or drop it if the live copy is sane."""
+    base = Path(root) if root is not None else USER_EXTRACTOR_DIR
+    package = base / "yt_dlp"
+    backup = base / "yt_dlp.backup"
+    if not backup.is_dir():
+        return None
+    try:
+        if not package.exists():
+            os.replace(backup, package)
+            return "restored"
+        problem = _package_problem(package)
+        if problem:
+            quarantine(f"broken before backup recovery: {problem}", package)
+            os.replace(backup, package)
+            return "restored"
+        shutil.rmtree(backup, ignore_errors=True)
+        return "discarded"
+    except OSError:
+        return None
+
+
 def activate() -> str:
     """Install the finder if the user copy is sane. Returns 'user' or 'bundled'."""
     global _active_finder
     if _active_finder is not None:
         return "user"
+    recover_backup()
     if not user_copy_present():
         return "bundled"
     problem = user_copy_problem()

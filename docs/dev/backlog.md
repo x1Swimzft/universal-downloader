@@ -43,9 +43,10 @@ Known gaps accepted knowingly. Not release blockers unless stated.
   A copy that fails at import time is quarantined and the import retried.
 - Wheel SHA-256 is now compared against PyPI's `digests.sha256` before install.
 
-Still open (not blocking): no total download deadline or progress for the wheel, no cancel,
-no recovery of `yt_dlp.backup` after a crash, and a stale user copy still shadows a newer
-bundled copy by design.
+Resolved 2026-11-09: wheel updates now have a 5-minute total deadline, cancellation via
+`asyncio.Event`, and `yt_dlp.backup` recovery on startup or before an install. Still open
+(not blocking): no byte-level progress indicator for the wheel, and a stale user copy
+still shadows a newer bundled copy by design.
 
 ## Release process - 2026-10-27
 
