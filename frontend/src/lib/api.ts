@@ -1,3 +1,5 @@
+import { APP_VERSION } from "./version";
+
 export function getApiBase(): string {
   if (typeof window !== "undefined") {
     const params = new URLSearchParams(window.location.search);
@@ -592,7 +594,7 @@ export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
   }
   return {
     status: "unavailable",
-    version: "1.0.0",
+    version: APP_VERSION,
     message: "Update checks are available in the installed desktop app.",
   };
 }

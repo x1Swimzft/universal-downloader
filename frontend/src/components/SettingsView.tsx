@@ -15,9 +15,7 @@ import {
   updateExtractor,
 } from "../lib/api";
 import { SettingRow } from "./SettingRow";
-
-// Single source for the version shown in Settings and in diagnostics.
-const APP_VERSION = "1.0.0";
+import { APP_VERSION } from "../lib/version";
 import { Switch } from "./Switch";
 import {
   AccentColor,

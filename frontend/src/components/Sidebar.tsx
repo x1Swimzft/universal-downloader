@@ -1,5 +1,6 @@
 import React from "react";
 import { Icon } from "./Icons";
+import { APP_VERSION } from "../lib/version";
 
 export type SidebarView = "dl" | "q" | "h" | "s";
 
@@ -16,7 +17,7 @@ export function Sidebar({
   onSelectView,
   activeQueueCount,
   onToggleTheme,
-  versionText = "v1.0.0 · Pro",
+  versionText = `v${APP_VERSION} · Pro`,
 }: SidebarProps) {
   return (
     <aside className="side">
