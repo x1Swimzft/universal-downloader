@@ -28,6 +28,10 @@
 
 > **v0.7.0** adds Spotify and Apple Music bridging, TikTok Photo Mode, an Instagram public-post fallback, playlist folders, audio filename templates, and 1–5 concurrent downloads.
 
+> **v1.5.0 is in preparation.** The Android pre-release is available now; the desktop beta
+> channel is configured for the next beta build. Stable installer links below still point
+> at v1.0.0. Draft notes: [docs/releases/v1.5.0.md](docs/releases/v1.5.0.md).
+
 ---
 
 ## ✨ What's new in 0.7.0
