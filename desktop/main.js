@@ -759,8 +759,10 @@ app.whenReady().then(async () => {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.removeMenu();
 
+  // Load 127.0.0.1 explicitly: on Windows `localhost` may resolve to ::1 and
+  // hit an unrelated dev server listening on the same port.
   mainWindow.loadURL(
-    `http://localhost:${frontendPort}?api_port=${backendPort}&token=${appSessionToken}`
+    `http://127.0.0.1:${frontendPort}?api_port=${backendPort}&token=${appSessionToken}`
   );
 
   mainWindow.on("close", (e) => {
