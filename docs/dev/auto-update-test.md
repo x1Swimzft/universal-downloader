@@ -13,6 +13,16 @@ tests run against a **copy** of `desktop/dist-release/win-unpacked`.
 
 ---
 
+## Automated harness (2026-11-09)
+
+`cd desktop && npm run test:e2e` runs `e2e/update.test.js` with `node:test`. It starts a
+local HTTP feed and exercises check -> available -> download -> install -> relaunch through
+the main-process updater functions. It injects the updater and never runs a real installer,
+so it is safe on a dev machine. The packaged-app procedure below remains the only way to
+verify the NSIS install and relaunch.
+
+---
+
 ## 1. Current updater facts
 
 | Fact | Where |

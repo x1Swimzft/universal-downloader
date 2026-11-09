@@ -15,6 +15,8 @@ from app.services.storage import cleanup_old_files
 
 logging.basicConfig(level=logging.INFO)
 
+APP_VERSION = "1.0.0"
+
 TMP_DIR = os.environ.get("TMP_DIR", os.path.join(os.path.dirname(__file__), "../tmp"))
 scheduler = AsyncIOScheduler()
 
@@ -39,7 +41,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Universal Downloader API",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { installUpdate, withTimeout, activeJobCount, MESSAGES } = require("./updater");
+const { checkForUpdate, installUpdate, withTimeout, activeJobCount, MESSAGES } = require("./updater");
 
 function fakeUpdater(overrides = {}) {
   const calls = { quit: 0 };
@@ -15,9 +15,82 @@ function fakeUpdater(overrides = {}) {
   };
 }
 
-const packagedApp = { isPackaged: true };
+const packagedApp = { isPackaged: true, getVersion: () => "1.0.0" };
 const yesDialog = { showMessageBox: async () => ({ response: 1 }) };
 const noDialog = { showMessageBox: async () => ({ response: 0 }) };
+
+test("check reports unavailable when the app is not packaged", async () => {
+  const result = await checkForUpdate({
+    app: { isPackaged: false, getVersion: () => "1.0.0" },
+    autoUpdater: {},
+  });
+
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.message, MESSAGES.checkUnavailable);
+});
+
+test("check reports an available update and disables autoDownload", async () => {
+  const autoUpdater = {
+    autoDownload: true,
+    checkForUpdates: async () => ({ updateInfo: { version: "9.9.9" } }),
+  };
+
+  const result = await checkForUpdate({ app: packagedApp, autoUpdater });
+
+  assert.deepEqual(result, {
+    status: "available",
+    version: "9.9.9",
+    message: "Version 9.9.9 is available.",
+  });
+  assert.equal(autoUpdater.autoDownload, false);
+});
+
+test("check reports up-to-date when the feed matches the running version", async () => {
+  const autoUpdater = {
+    checkForUpdates: async () => ({ updateInfo: { version: "1.0.0" } }),
+  };
+
+  const result = await checkForUpdate({ app: packagedApp, autoUpdater });
+
+  assert.equal(result.status, "up-to-date");
+  assert.equal(result.version, "1.0.0");
+  assert.equal(result.message, MESSAGES.checkLatest);
+});
+
+test("check treats a missing feed as up-to-date", async () => {
+  const autoUpdater = {
+    checkForUpdates: async () => {
+      throw new Error("Cannot find latest.yml in the latest release");
+    },
+  };
+
+  const result = await checkForUpdate({ app: packagedApp, autoUpdater });
+
+  assert.equal(result.status, "up-to-date");
+  assert.equal(result.message, MESSAGES.checkNoRelease);
+});
+
+test("check reports a network error distinctly", async () => {
+  const autoUpdater = {
+    checkForUpdates: async () => {
+      throw new Error("ECONNREFUSED");
+    },
+  };
+
+  const result = await checkForUpdate({ app: packagedApp, autoUpdater });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.message, MESSAGES.checkFailed);
+});
+
+test("check times out with an actionable message", async () => {
+  const autoUpdater = { checkForUpdates: () => new Promise(() => {}) };
+
+  const result = await checkForUpdate({ app: packagedApp, autoUpdater, timeoutMs: 10 });
+
+  assert.equal(result.status, "error");
+  assert.equal(result.message, MESSAGES.checkFailed);
+});
 
 test("refuses to install when the app is not packaged", async () => {
   const result = await installUpdate({

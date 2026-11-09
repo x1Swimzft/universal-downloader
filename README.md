@@ -252,6 +252,8 @@ cd ..\backend
 .\.venv\Scripts\pyinstaller backend-engine.spec --noconfirm --clean
 Remove-Item ..\desktop\backend-engine -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item dist\backend-engine ..\desktop\backend-engine -Recurse
+$appVersion = [regex]::Match((Get-Content app\main.py -Raw), 'APP_VERSION\s*=\s*[''"]([^''"]+)[''"]').Groups[1].Value
+Set-Content -Path ..\desktop\backend-engine\app-version.txt -Value $appVersion -NoNewline
 
 # 3. Build the installer and portable ZIP
 cd ..\desktop

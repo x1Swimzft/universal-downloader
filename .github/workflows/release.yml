@@ -52,6 +52,9 @@ jobs:
         run: |
           Remove-Item desktop/backend-engine/* -Recurse -Force -ErrorAction SilentlyContinue
           Copy-Item backend/dist/backend-engine/* -Destination desktop/backend-engine -Recurse -Force
+          $version = [regex]::Match((Get-Content backend/app/main.py -Raw), 'APP_VERSION\s*=\s*[''"]([^''"]+)[''"]').Groups[1].Value
+          if (-not $version) { throw "APP_VERSION not found in backend/app/main.py" }
+          Set-Content -Path desktop/backend-engine/app-version.txt -Value $version -NoNewline
 
       - uses: actions/setup-node@v4
         with:

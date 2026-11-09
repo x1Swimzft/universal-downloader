@@ -313,6 +313,23 @@ if (!existsSync(engineExe)) {
   } else {
     pass('backend-engine.exe is newer than backend/app sources');
   }
+
+  const stampFile = join(repo, 'desktop', 'backend-engine', 'app-version.txt');
+  const backend = backendVersion();
+  if (!existsSync(stampFile)) {
+    fail('backend-engine/app-version.txt is missing - stamp the engine from backend APP_VERSION');
+  } else {
+    const stamp = readText(stampFile).text.trim();
+    if (!stamp) {
+      fail('backend-engine/app-version.txt is empty');
+    } else if (backend.version && stamp !== backend.version) {
+      fail(`backend-engine stamp ${stamp} != backend APP_VERSION ${backend.version}`);
+    } else if (version && stamp !== version) {
+      fail(`backend-engine stamp ${stamp} != latest.yml ${version}`);
+    } else {
+      pass(`backend-engine stamp is ${stamp}`);
+    }
+  }
 }
 
 // --- result --------------------------------------------------------------
